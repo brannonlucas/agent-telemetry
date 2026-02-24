@@ -17,7 +17,9 @@
 			"types": "./src/adapters/inngest.ts"
 		}
 	},
-	"files": ["src"],
+	"files": [
+		"src"
+	],
 	"scripts": {
 		"test": "bun test",
 		"typecheck": "tsc --noEmit",
@@ -29,8 +31,12 @@
 		"inngest": ">=3.0.0"
 	},
 	"peerDependenciesMeta": {
-		"hono": { "optional": true },
-		"inngest": { "optional": true }
+		"hono": {
+			"optional": true
+		},
+		"inngest": {
+			"optional": true
+		}
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^1.9.0",
@@ -43,7 +49,16 @@
 	"author": "Brannon Lucas",
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/brannonlucas/agent-telemetry"
+		"url": "git+https://github.com/brannonlucas/agent-telemetry.git"
 	},
-	"keywords": ["telemetry", "observability", "jsonl", "agent", "ai", "tracing", "hono", "inngest"]
+	"keywords": [
+		"telemetry",
+		"observability",
+		"jsonl",
+		"agent",
+		"ai",
+		"tracing",
+		"hono",
+		"inngest"
+	]
 }
