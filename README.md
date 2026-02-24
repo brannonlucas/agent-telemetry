@@ -1,8 +1,8 @@
 # agent-telemetry
 
-Lightweight JSONL telemetry for AI agent backends. Zero runtime dependencies.
+Lightweight JSONL telemetry for easier AI agent consumption. Zero runtime dependencies.
 
-Writes structured telemetry events to rotating JSONL files in development. Falls back to `console.log` in runtimes without filesystem access (Cloudflare Workers). Includes framework adapters for [Hono](https://hono.dev) and [Inngest](https://inngest.com).
+Writes structured telemetry events to rotating JSONL files in development. Falls back to `console.log` in runtimes without filesystem access (Cloudflare Workers). Includes framework adapters for [Hono](https://hono.dev) and [Inngest](https://inngest.com), more coming soon.
 
 ## Install
 
