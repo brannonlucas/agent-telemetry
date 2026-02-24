@@ -70,3 +70,5 @@ export type {
 // Re-export utilities
 export { generateSpanId, generateTraceId } from "./ids.ts";
 export { extractEntities, extractEntitiesFromEvent } from "./entities.ts";
+export { formatTraceparent, parseTraceparent } from "./traceparent.ts";
+export type { Traceparent } from "./traceparent.ts";

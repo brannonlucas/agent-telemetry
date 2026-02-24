@@ -4,8 +4,10 @@ import { createHonoTrace, getTraceContext } from "../../src/adapters/hono.ts";
 import { createTelemetry } from "../../src/index.ts";
 import type { HttpEvents } from "../../src/types.ts";
 
+const TRACEPARENT_RE = /^00-[\da-f]{32}-[\da-f]{16}-[\da-f]{2}$/;
+
 describe("createHonoTrace", () => {
-	it("sets X-Trace-Id response header", async () => {
+	it("sets traceparent response header", async () => {
 		const telemetry = await createTelemetry<HttpEvents>({ isEnabled: () => false });
 		const trace = createHonoTrace({ telemetry });
 
@@ -15,10 +17,10 @@ describe("createHonoTrace", () => {
 
 		const res = await app.request("/test");
 		expect(res.status).toBe(200);
-		expect(res.headers.get("X-Trace-Id")).toMatch(/^[\da-f]{32}$/);
+		expect(res.headers.get("traceparent")).toMatch(TRACEPARENT_RE);
 	});
 
-	it("propagates incoming X-Trace-Id header", async () => {
+	it("propagates incoming traceparent header", async () => {
 		const telemetry = await createTelemetry<HttpEvents>({ isEnabled: () => false });
 		const trace = createHonoTrace({ telemetry });
 
@@ -26,14 +28,23 @@ describe("createHonoTrace", () => {
 		app.use("*", trace);
 		app.get("/test", (c) => c.text("ok"));
 
-		const incomingId = "a".repeat(32);
+		const incomingTraceId = "a".repeat(32);
+		const incomingParentId = "b".repeat(16);
+		const incoming = `00-${incomingTraceId}-${incomingParentId}-01`;
+
 		const res = await app.request("/test", {
-			headers: { "X-Trace-Id": incomingId },
+			headers: { traceparent: incoming },
 		});
-		expect(res.headers.get("X-Trace-Id")).toBe(incomingId);
+
+		const outgoing = res.headers.get("traceparent");
+		expect(outgoing).toMatch(TRACEPARENT_RE);
+		// trace-id is preserved from incoming
+		expect(outgoing).toContain(incomingTraceId);
+		// parent-id is a new span for this request, not the incoming parent
+		expect(outgoing).not.toContain(incomingParentId);
 	});
 
-	it("ignores invalid incoming X-Trace-Id header", async () => {
+	it("ignores invalid incoming traceparent header", async () => {
 		const telemetry = await createTelemetry<HttpEvents>({ isEnabled: () => false });
 		const trace = createHonoTrace({ telemetry });
 
@@ -41,13 +52,12 @@ describe("createHonoTrace", () => {
 		app.use("*", trace);
 		app.get("/test", (c) => c.text("ok"));
 
-		const incomingId = "invalid-trace-id";
 		const res = await app.request("/test", {
-			headers: { "X-Trace-Id": incomingId },
+			headers: { traceparent: "invalid-traceparent" },
 		});
-		const responseTraceId = res.headers.get("X-Trace-Id");
-		expect(responseTraceId).toMatch(/^[\da-f]{32}$/);
-		expect(responseTraceId).not.toBe(incomingId);
+
+		const outgoing = res.headers.get("traceparent");
+		expect(outgoing).toMatch(TRACEPARENT_RE);
 	});
 
 	it("emits http.request event", async () => {
@@ -152,6 +162,28 @@ describe("getTraceContext", () => {
 		expect(traceCtx._trace).toBeDefined();
 		expect(traceCtx._trace.traceId).toMatch(/^[\da-f]{32}$/);
 		expect(traceCtx._trace.parentSpanId).toMatch(/^[\da-f]{16}$/);
+	});
+
+	it("returns consistent spanId across multiple calls in same request", async () => {
+		const telemetry = await createTelemetry<HttpEvents>({ isEnabled: () => false });
+		const trace = createHonoTrace({ telemetry });
+
+		let ctx1: ReturnType<typeof getTraceContext> | undefined;
+		let ctx2: ReturnType<typeof getTraceContext> | undefined;
+
+		const app = new Hono();
+		app.use("*", trace);
+		app.get("/test", (c) => {
+			ctx1 = getTraceContext(c);
+			ctx2 = getTraceContext(c);
+			return c.text("ok");
+		});
+
+		await app.request("/test");
+
+		const t1 = ctx1 as { _trace: { traceId: string; parentSpanId: string } };
+		const t2 = ctx2 as { _trace: { traceId: string; parentSpanId: string } };
+		expect(t1._trace.parentSpanId).toBe(t2._trace.parentSpanId);
 	});
 
 	it("returns empty object when no trace middleware", async () => {

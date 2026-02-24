@@ -5,6 +5,8 @@
  * http.request telemetry events, and provides getTraceContext() for
  * injecting trace context into downstream dispatches.
  *
+ * Uses the W3C `traceparent` header for trace propagation.
+ *
  * @example
  * ```ts
  * import { createTelemetry, type HttpEvents } from 'agent-telemetry'
@@ -20,7 +22,7 @@
 import type { Context, MiddlewareHandler } from "hono";
 import { extractEntities } from "../entities.ts";
 import { generateSpanId, generateTraceId } from "../ids.ts";
-import { DEFAULT_TRACE_HEADER } from "../middleware/http.ts";
+import { formatTraceparent, parseTraceparent } from "../traceparent.ts";
 import type { EntityPattern, HttpRequestEvent, Telemetry } from "../types.ts";
 
 /** Options for Hono trace middleware. */
@@ -29,36 +31,35 @@ export interface HonoTraceOptions {
 	telemetry: Telemetry<HttpRequestEvent>;
 	/** Entity patterns for extracting IDs from URL paths. */
 	entityPatterns?: EntityPattern[];
-	/** Request header name for incoming trace IDs. Default: "X-Trace-Id". */
-	traceHeader?: string;
 	/** Guard function — return false to skip tracing for a request. */
 	isEnabled?: () => boolean;
 }
 
-/** Hono variable key for trace ID storage. */
-const TRACE_VAR = "traceId" as const;
-const TRACE_ID_RE = /^[\da-f]{32}$/i;
+/** Hono variable keys for trace storage. */
+const TRACE_ID_VAR = "traceId" as const;
+const SPAN_ID_VAR = "spanId" as const;
 
 /**
  * Create Hono middleware that traces HTTP requests.
  *
- * Generates a traceId per request (or propagates a valid incoming header value),
- * stores it on the Hono context, sets the response header, and emits
+ * Generates a traceId per request (or propagates a valid incoming `traceparent`),
+ * stores it on the Hono context, sets the `traceparent` response header, and emits
  * an http.request event on completion.
  */
 export function createHonoTrace(options: HonoTraceOptions): MiddlewareHandler {
-	const { telemetry, entityPatterns, traceHeader = DEFAULT_TRACE_HEADER, isEnabled } = options;
+	const { telemetry, entityPatterns, isEnabled } = options;
 
 	return async (c, next) => {
 		if (isEnabled && !isEnabled()) {
 			return next();
 		}
 
-		const incomingTraceId = c.req.header(traceHeader)?.trim();
-		const traceId =
-			incomingTraceId && TRACE_ID_RE.test(incomingTraceId) ? incomingTraceId : generateTraceId();
+		const parsed = parseTraceparent(c.req.header("traceparent"));
+		const traceId = parsed?.traceId ?? generateTraceId();
+		const spanId = generateSpanId();
 
-		c.set(TRACE_VAR, traceId);
+		c.set(TRACE_ID_VAR, traceId);
+		c.set(SPAN_ID_VAR, spanId);
 
 		const start = performance.now();
 		let error: string | undefined;
@@ -73,7 +74,7 @@ export function createHonoTrace(options: HonoTraceOptions): MiddlewareHandler {
 			const duration_ms = Math.round(performance.now() - start);
 			const path = c.req.path;
 
-			c.header(traceHeader, traceId);
+			c.header("traceparent", formatTraceparent(traceId, spanId));
 
 			const event: HttpRequestEvent = {
 				kind: "http.request",
@@ -112,7 +113,8 @@ export function createHonoTrace(options: HonoTraceOptions): MiddlewareHandler {
 export function getTraceContext(
 	c: Context,
 ): { _trace: { traceId: string; parentSpanId: string } } | Record<string, never> {
-	const traceId = c.get(TRACE_VAR) as string | undefined;
+	const traceId = c.get(TRACE_ID_VAR) as string | undefined;
+	const spanId = c.get(SPAN_ID_VAR) as string | undefined;
 	if (!traceId) return {};
-	return { _trace: { traceId, parentSpanId: generateSpanId() } };
+	return { _trace: { traceId, parentSpanId: spanId ?? generateSpanId() } };
 }

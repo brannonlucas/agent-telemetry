@@ -130,4 +130,5 @@ export interface Telemetry<TEvent extends BaseTelemetryEvent = PresetEvents> {
 export interface TraceContext {
 	traceId: string;
 	parentSpanId: string;
+	traceFlags?: string;
 }

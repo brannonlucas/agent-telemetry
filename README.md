@@ -41,7 +41,7 @@ Each call to `emit()` appends a JSON line to `logs/telemetry.jsonl` with an auto
 The library connects three layers of tracing — HTTP requests, event dispatch, and background jobs — through a shared `traceId`:
 
 ```
-Browser → HTTP Request → Hono Middleware (generates traceId)
+Browser → HTTP Request → Hono Middleware (parses/generates traceparent)
                               ↓
                          getTraceContext(c)  →  { _trace: { traceId, parentSpanId } }
                               ↓
@@ -52,7 +52,7 @@ Browser → HTTP Request → Hono Middleware (generates traceId)
                          job.start / job.end (same traceId)
 ```
 
-One `traceId` follows a request from the HTTP boundary through dispatch into background job execution. Query your JSONL logs by `traceId` to see the full chain.
+One `traceId` follows a request from the HTTP boundary through dispatch into background job execution. The Hono adapter uses the [W3C `traceparent`](https://www.w3.org/TR/trace-context/) header for propagation, enabling interop with OpenTelemetry and other standards-compliant tools. Query your JSONL logs by `traceId` to see the full chain.
 
 ## Full-Stack Example
 
@@ -148,7 +148,6 @@ const trace = createHonoTrace({
     { segment: 'users', key: 'userId' },
     { segment: 'posts', key: 'postId' },
   ],
-  traceHeader: 'X-Trace-Id',  // Header name (default: 'X-Trace-Id')
   isEnabled: () => true,       // Guard function (default: () => true)
 })
 
@@ -156,8 +155,8 @@ app.use('*', trace)
 ```
 
 The middleware:
-- Generates a unique `traceId` per request (or propagates a valid 32-char hex ID from `X-Trace-Id`)
-- Sets `X-Trace-Id` on the response for client-side correlation
+- Parses the incoming W3C `traceparent` header, or generates a fresh trace ID if absent/invalid
+- Sets `traceparent` on the response for client-side correlation (format: `00-{traceId}-{spanId}-01`)
 - Emits `http.request` events with method, path, status, duration, and extracted entities
 - Extracts entity IDs from URL paths — looks for a matching `segment`, then checks if the next segment is a UUID
 
