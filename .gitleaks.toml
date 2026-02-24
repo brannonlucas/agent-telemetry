@@ -2,7 +2,19 @@
 path = "/Users/brannonlucas/.gitleaks-config/.gitleaks.toml"
 
 [allowlist]
-description = "Test data allowlist"
+description = "Test data and doc example allowlist"
 paths = [
   '''tests/.*\.test\.ts''',
 ]
+
+[[rules]]
+id = "uuid"
+description = "Allow example UUIDs in doc comments"
+
+  [rules.allowlist]
+  description = "RFC 4122 example UUIDs in JSDoc"
+  regexTarget = "match"
+  regexes = [
+    '''550e8400-e29b-41d4-a716-446655440000''',
+    '''6ba7b810-9dad-11d1-80b4-00c04fd430c8''',
+  ]

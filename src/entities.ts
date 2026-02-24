@@ -22,8 +22,11 @@ const UUID_RE = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i;
  *   { segment: 'users', key: 'userId' },
  *   { segment: 'posts', key: 'postId' },
  * ]
- * extractEntities('/api/users/abc-123/posts/def-456', patterns)
- * // → { userId: 'abc-123', postId: 'def-456' }
+ * extractEntities(
+ *   '/api/users/550e8400-e29b-41d4-a716-446655440000/posts/6ba7b810-9dad-11d1-80b4-00c04fd430c8',
+ *   patterns,
+ * )
+ * // → { userId: '550e8400-e29b-41d4-a716-446655440000', postId: '6ba7b810-9dad-11d1-80b4-00c04fd430c8' }
  * ```
  */
 export function extractEntities(

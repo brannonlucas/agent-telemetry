@@ -33,6 +33,23 @@ describe("createHonoTrace", () => {
 		expect(res.headers.get("X-Trace-Id")).toBe(incomingId);
 	});
 
+	it("ignores invalid incoming X-Trace-Id header", async () => {
+		const telemetry = await createTelemetry<HttpEvents>({ isEnabled: () => false });
+		const trace = createHonoTrace({ telemetry });
+
+		const app = new Hono();
+		app.use("*", trace);
+		app.get("/test", (c) => c.text("ok"));
+
+		const incomingId = "invalid-trace-id";
+		const res = await app.request("/test", {
+			headers: { "X-Trace-Id": incomingId },
+		});
+		const responseTraceId = res.headers.get("X-Trace-Id");
+		expect(responseTraceId).toMatch(/^[\da-f]{32}$/);
+		expect(responseTraceId).not.toBe(incomingId);
+	});
+
 	it("emits http.request event", async () => {
 		const emitted: unknown[] = [];
 		const telemetry = { emit: (e: unknown) => emitted.push(e) };

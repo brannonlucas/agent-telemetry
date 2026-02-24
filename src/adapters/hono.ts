@@ -37,11 +37,12 @@ export interface HonoTraceOptions {
 
 /** Hono variable key for trace ID storage. */
 const TRACE_VAR = "traceId" as const;
+const TRACE_ID_RE = /^[\da-f]{32}$/i;
 
 /**
  * Create Hono middleware that traces HTTP requests.
  *
- * Generates a traceId per request (or propagates from incoming header),
+ * Generates a traceId per request (or propagates a valid incoming header value),
  * stores it on the Hono context, sets the response header, and emits
  * an http.request event on completion.
  */
@@ -53,8 +54,9 @@ export function createHonoTrace(options: HonoTraceOptions): MiddlewareHandler {
 			return next();
 		}
 
-		const incomingTraceId = c.req.header(traceHeader);
-		const traceId = incomingTraceId || generateTraceId();
+		const incomingTraceId = c.req.header(traceHeader)?.trim();
+		const traceId =
+			incomingTraceId && TRACE_ID_RE.test(incomingTraceId) ? incomingTraceId : generateTraceId();
 
 		c.set(TRACE_VAR, traceId);
 

@@ -35,6 +35,10 @@ const DEFAULTS: WriterConfig = {
  */
 export async function createWriter(config?: Partial<WriterConfig>): Promise<Writer> {
 	const cfg = { ...DEFAULTS, ...config };
+	const writeToConsole = (line: string): void => {
+		// biome-ignore lint/suspicious/noConsole: intentional fallback for runtimes without filesystem
+		console.log(`${cfg.prefix} ${line}`);
+	};
 
 	try {
 		const fs = await import("node:fs");
@@ -50,39 +54,72 @@ export async function createWriter(config?: Partial<WriterConfig>): Promise<Writ
 			throw new Error("Filesystem probe failed");
 		}
 
+		let useConsoleFallback = false;
+
+		const rotate = (): void => {
+			if (!fs.existsSync(logFile)) return;
+
+			if (cfg.maxBackups <= 0) {
+				fs.unlinkSync(logFile);
+				return;
+			}
+
+			const oldestBackup = `${logFile}.${cfg.maxBackups}`;
+			if (fs.existsSync(oldestBackup)) {
+				fs.unlinkSync(oldestBackup);
+			}
+
+			for (let i = cfg.maxBackups - 1; i >= 1; i--) {
+				const from = `${logFile}.${i}`;
+				const to = `${logFile}.${i + 1}`;
+				if (fs.existsSync(from)) {
+					fs.renameSync(from, to);
+				}
+			}
+
+			fs.renameSync(logFile, `${logFile}.1`);
+		};
+
 		return {
 			write(line: string) {
+				if (useConsoleFallback) {
+					writeToConsole(line);
+					return;
+				}
+
 				try {
-					// Rotate if over max size
+					const lineWithNewline = `${line}\n`;
+					const incomingSize = Buffer.byteLength(lineWithNewline);
+					let currentSize = 0;
+
 					try {
-						const stats = fs.statSync(logFile);
-						if (stats.size > cfg.maxSize) {
-							for (let i = cfg.maxBackups - 1; i >= 1; i--) {
-								const from = `${logFile}.${i}`;
-								const to = `${logFile}.${i + 1}`;
-								if (fs.existsSync(from)) {
-									if (i === cfg.maxBackups - 1 && fs.existsSync(to)) fs.unlinkSync(to);
-									fs.renameSync(from, to);
-								}
-							}
-							fs.renameSync(logFile, `${logFile}.1`);
+						currentSize = fs.statSync(logFile).size;
+					} catch (err) {
+						const isEnoent =
+							typeof err === "object" &&
+							err !== null &&
+							"code" in err &&
+							(err as { code?: unknown }).code === "ENOENT";
+						if (!isEnoent) {
+							throw err;
 						}
-					} catch {
-						// File doesn't exist yet — that's fine
 					}
-					fs.appendFileSync(logFile, `${line}\n`);
+
+					if (cfg.maxSize > 0 && currentSize + incomingSize > cfg.maxSize) {
+						rotate();
+					}
+
+					fs.appendFileSync(logFile, lineWithNewline);
 				} catch {
-					// Filesystem write failed — silent fallback
+					useConsoleFallback = true;
+					writeToConsole(line);
 				}
 			},
 		};
 	} catch {
 		// Import failed or filesystem probe failed — console fallback
 		return {
-			write(line: string) {
-				// biome-ignore lint/suspicious/noConsole: intentional fallback for runtimes without filesystem
-				console.log(`${cfg.prefix} ${line}`);
-			},
+			write: writeToConsole,
 		};
 	}
 }
