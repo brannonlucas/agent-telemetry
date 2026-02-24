@@ -1,0 +1,8 @@
+[extend]
+path = "/Users/brannonlucas/.gitleaks-config/.gitleaks.toml"
+
+[allowlist]
+description = "Test data allowlist"
+paths = [
+  '''tests/.*\.test\.ts''',
+]
