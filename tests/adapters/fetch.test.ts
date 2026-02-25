@@ -5,6 +5,13 @@ import type { ExternalCallEvent } from "../../src/types.ts";
 
 const mockFetch: FetchFn = async () => new Response("ok", { status: 200 });
 
+function readTraceparentHeader(input: RequestInfo | URL, init?: RequestInit): string | null {
+	if (input instanceof Request) {
+		return input.headers.get("traceparent");
+	}
+	return new Headers(init?.headers).get("traceparent");
+}
+
 describe("createTracedFetch", () => {
 	it("emits external.call event for string URL", async () => {
 		const emitted: unknown[] = [];
@@ -205,5 +212,79 @@ describe("createTracedFetch", () => {
 
 		const event = emitted[0] as Record<string, unknown>;
 		expect(event.traceId).toBe("a".repeat(32));
+		expect(event.parentSpanId).toBe("b".repeat(16));
+	});
+
+	it("injects traceparent header when propagateTo allows URL", async () => {
+		const emitted: unknown[] = [];
+		let observedTraceparent: string | null = null;
+		const telemetry = { emit: (e: unknown) => emitted.push(e) };
+		const baseFetch: FetchFn = async (input, init) => {
+			observedTraceparent = readTraceparentHeader(input, init);
+			return new Response("ok", { status: 200 });
+		};
+		const fetch = createTracedFetch({
+			telemetry: telemetry as { emit: (e: ExternalCallEvent) => void },
+			baseFetch,
+			getTraceContext: () => ({
+				traceId: "a".repeat(32),
+				parentSpanId: "b".repeat(16),
+			}),
+			propagateTo: () => true,
+		});
+
+		await fetch("https://api.example.com/users");
+
+		expect(observedTraceparent).toMatch(/^00-[\da-f]{32}-[\da-f]{16}-[\da-f]{2}$/);
+
+		const event = emitted[0] as Record<string, unknown>;
+		expect(observedTraceparent).not.toBeNull();
+		if (observedTraceparent == null) {
+			throw new Error("expected traceparent header to be present");
+		}
+		expect(String(observedTraceparent)).toBe(`00-${event.traceId}-${event.spanId}-01`);
+	});
+
+	it("does not inject traceparent header by default for cross-origin requests", async () => {
+		let observedTraceparent: string | null = "preset";
+		const telemetry = { emit: () => {} };
+		const baseFetch: FetchFn = async (input, init) => {
+			observedTraceparent = readTraceparentHeader(input, init);
+			return new Response("ok", { status: 200 });
+		};
+		const fetch = createTracedFetch({
+			telemetry: telemetry as { emit: (e: ExternalCallEvent) => void },
+			baseFetch,
+			getTraceContext: () => ({
+				traceId: "a".repeat(32),
+				parentSpanId: "b".repeat(16),
+			}),
+		});
+
+		await fetch("https://api.example.com/users");
+
+		expect(observedTraceparent).toBeNull();
+	});
+
+	it("exposes response traceparent via callback", async () => {
+		const telemetry = { emit: () => {} };
+		const responseTraceparent = `00-${"c".repeat(32)}-${"d".repeat(16)}-01`;
+		let observed: string | undefined;
+		const baseFetch: FetchFn = async () =>
+			new Response("ok", {
+				status: 200,
+				headers: { traceparent: responseTraceparent },
+			});
+		const fetch = createTracedFetch({
+			telemetry: telemetry as { emit: (e: ExternalCallEvent) => void },
+			baseFetch,
+			onResponseTraceparent: (traceparent) => {
+				observed = traceparent;
+			},
+		});
+
+		await fetch("https://api.example.com/users");
+
+		expect(observed).toBe(responseTraceparent);
 	});
 });

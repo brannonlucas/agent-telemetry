@@ -18,8 +18,8 @@
  */
 
 import { extractEntities } from "../entities.ts";
-import { generateSpanId, generateTraceId } from "../ids.ts";
-import { formatTraceparent, parseTraceparent } from "../traceparent.ts";
+import { startSpanFromTraceparent } from "../trace-context.ts";
+import { formatTraceparent } from "../traceparent.ts";
 import type { EntityPattern, HttpRequestEvent, Telemetry } from "../types.ts";
 
 // ---------------------------------------------------------------------------
@@ -62,7 +62,10 @@ type FastifyPluginCallback = ((
 // Trace storage (keyed on Fastify request wrapper, not request.raw)
 // ---------------------------------------------------------------------------
 
-const traceStore = new WeakMap<object, { traceId: string; spanId: string }>();
+const traceStore = new WeakMap<
+	object,
+	{ traceId: string; spanId: string; parentSpanId?: string; traceFlags: string }
+>();
 
 function stripQueryAndFragment(url: string): string {
 	const queryIdx = url.indexOf("?");
@@ -113,12 +116,15 @@ export function createFastifyTrace(options: FastifyTraceOptions): FastifyPluginC
 			const incoming = Array.isArray(request.headers.traceparent)
 				? request.headers.traceparent[0]
 				: request.headers.traceparent;
-			const parsed = parseTraceparent(incoming);
-			const traceId = parsed?.traceId ?? generateTraceId();
-			const spanId = generateSpanId();
+			const span = startSpanFromTraceparent(incoming);
 
-			traceStore.set(request, { traceId, spanId });
-			reply.header("traceparent", formatTraceparent(traceId, spanId));
+			traceStore.set(request, {
+				traceId: span.traceId,
+				spanId: span.spanId,
+				parentSpanId: span.parentSpanId,
+				traceFlags: span.traceFlags,
+			});
+			reply.header("traceparent", formatTraceparent(span.traceId, span.spanId, span.traceFlags));
 			hookDone();
 		});
 
@@ -136,6 +142,8 @@ export function createFastifyTrace(options: FastifyTraceOptions): FastifyPluginC
 			const event: HttpRequestEvent = {
 				kind: "http.request",
 				traceId: trace.traceId,
+				spanId: trace.spanId,
+				parentSpanId: trace.parentSpanId,
 				method: request.method,
 				path,
 				status: reply.statusCode,
@@ -183,9 +191,17 @@ export function createFastifyTrace(options: FastifyTraceOptions): FastifyPluginC
  */
 export function getTraceContext(
 	request: unknown,
-): { _trace: { traceId: string; parentSpanId: string } } | Record<string, never> {
+):
+	| { _trace: { traceId: string; parentSpanId: string; traceFlags?: string } }
+	| Record<string, never> {
 	if (!request || typeof request !== "object") return {};
 	const trace = traceStore.get(request);
 	if (!trace) return {};
-	return { _trace: { traceId: trace.traceId, parentSpanId: trace.spanId } };
+	return {
+		_trace: {
+			traceId: trace.traceId,
+			parentSpanId: trace.spanId,
+			traceFlags: trace.traceFlags,
+		},
+	};
 }

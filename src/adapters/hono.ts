@@ -22,8 +22,9 @@
 import type { Context, MiddlewareHandler } from "hono";
 import { extractEntities } from "../entities.ts";
 import { toSafeErrorLabel } from "../error.ts";
-import { generateSpanId, generateTraceId } from "../ids.ts";
-import { formatTraceparent, parseTraceparent } from "../traceparent.ts";
+import { generateSpanId } from "../ids.ts";
+import { startSpanFromTraceparent } from "../trace-context.ts";
+import { formatTraceparent } from "../traceparent.ts";
 import type { EntityPattern, HttpRequestEvent, Telemetry } from "../types.ts";
 
 /** Options for Hono trace middleware. */
@@ -39,6 +40,7 @@ export interface HonoTraceOptions {
 /** Hono variable keys for trace storage. */
 const TRACE_ID_VAR = "traceId" as const;
 const SPAN_ID_VAR = "spanId" as const;
+const TRACE_FLAGS_VAR = "traceFlags" as const;
 
 /**
  * Create Hono middleware that traces HTTP requests.
@@ -55,12 +57,11 @@ export function createHonoTrace(options: HonoTraceOptions): MiddlewareHandler {
 			return next();
 		}
 
-		const parsed = parseTraceparent(c.req.header("traceparent"));
-		const traceId = parsed?.traceId ?? generateTraceId();
-		const spanId = generateSpanId();
+		const span = startSpanFromTraceparent(c.req.header("traceparent"));
 
-		c.set(TRACE_ID_VAR, traceId);
-		c.set(SPAN_ID_VAR, spanId);
+		c.set(TRACE_ID_VAR, span.traceId);
+		c.set(SPAN_ID_VAR, span.spanId);
+		c.set(TRACE_FLAGS_VAR, span.traceFlags);
 
 		const start = performance.now();
 		let error: string | undefined;
@@ -75,11 +76,13 @@ export function createHonoTrace(options: HonoTraceOptions): MiddlewareHandler {
 			const duration_ms = Math.round(performance.now() - start);
 			const path = c.req.path;
 
-			c.header("traceparent", formatTraceparent(traceId, spanId));
+			c.header("traceparent", formatTraceparent(span.traceId, span.spanId, span.traceFlags));
 
 			const event: HttpRequestEvent = {
 				kind: "http.request",
-				traceId,
+				traceId: span.traceId,
+				spanId: span.spanId,
+				parentSpanId: span.parentSpanId,
 				method: c.req.method,
 				path,
 				status,
@@ -117,9 +120,12 @@ export function createHonoTrace(options: HonoTraceOptions): MiddlewareHandler {
  */
 export function getTraceContext(
 	c: Context,
-): { _trace: { traceId: string; parentSpanId: string } } | Record<string, never> {
+):
+	| { _trace: { traceId: string; parentSpanId: string; traceFlags?: string } }
+	| Record<string, never> {
 	const traceId = c.get(TRACE_ID_VAR) as string | undefined;
 	const spanId = c.get(SPAN_ID_VAR) as string | undefined;
+	const traceFlags = c.get(TRACE_FLAGS_VAR) as string | undefined;
 	if (!traceId) return {};
-	return { _trace: { traceId, parentSpanId: spanId ?? generateSpanId() } };
+	return { _trace: { traceId, parentSpanId: spanId ?? generateSpanId(), traceFlags } };
 }

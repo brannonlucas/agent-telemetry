@@ -2,7 +2,7 @@
 
 Lightweight JSONL telemetry for easier AI agent consumption. Zero runtime dependencies.
 
-Writes structured telemetry events to rotating JSONL files in development. Falls back to `console.log` in runtimes without filesystem access (Cloudflare Workers). Includes framework adapters for Hono, Inngest, Express, Fastify, Prisma, Supabase, and a generic traced fetch wrapper.
+Writes structured telemetry events to rotating JSONL files in development. Falls back to `console.log` in runtimes without filesystem access (Cloudflare Workers). Includes framework adapters for Hono, Inngest, Express, Fastify, Prisma, Supabase, a generic traced fetch wrapper, and browser trace-context helpers.
 
 ## Install
 
@@ -47,7 +47,7 @@ Inbound HTTP  →  Database Queries  →  External API Calls  →  Background Jo
   Fastify                                storage/functions)
 ```
 
-One `traceId` follows a request from the HTTP boundary through database queries, external API calls, and into background job execution. HTTP adapters use the [W3C `traceparent`](https://www.w3.org/TR/trace-context/) header for propagation, enabling interop with OpenTelemetry and other standards-compliant tools. Query your JSONL logs by `traceId` to see the full chain.
+One `traceId` follows a request from the HTTP boundary through database queries, external API calls, and into background job execution. `spanId`/`parentSpanId` fields preserve parent-child relationships inside that trace. HTTP adapters use the [W3C `traceparent`](https://www.w3.org/TR/trace-context/) header for propagation, enabling interop with OpenTelemetry and other standards-compliant tools. Query your JSONL logs by `traceId` to see the full chain.
 
 ## Full-Stack Example
 
@@ -152,10 +152,10 @@ app.use('*', trace)
 The middleware:
 - Parses the incoming W3C `traceparent` header, or generates a fresh trace ID if absent/invalid
 - Sets `traceparent` on the response for client-side correlation (format: `00-{traceId}-{spanId}-01`)
-- Emits `http.request` events with method, path, status, duration, and extracted entities
+- Emits `http.request` events with method, path, status, duration, extracted entities, and span linkage (`spanId`, `parentSpanId`)
 - Extracts entity IDs from URL paths — looks for a matching `segment`, then checks if the next segment is a UUID
 
-`getTraceContext(c)` returns `{ _trace: { traceId, parentSpanId } }` for spreading into dispatch payloads. Returns `{}` if no trace middleware is active.
+`getTraceContext(c)` returns `{ _trace: { traceId, parentSpanId, traceFlags } }` for spreading into dispatch payloads. Returns `{}` if no trace middleware is active.
 
 ## Inngest Adapter
 
@@ -188,16 +188,46 @@ const fetch = createTracedFetch({
   telemetry,
   baseFetch: globalThis.fetch,       // Optional — default: globalThis.fetch
   getTraceContext: () => ctx,         // Optional — correlate with parent request
+  propagateTo: (url) => url.origin === 'https://api.my-app.com', // Optional header allowlist
+  onResponseTraceparent: (tp) => {    // Optional response callback
+    console.log(tp)
+  },
   isEnabled: () => true,             // Optional guard
 })
 
 const res = await fetch('https://api.stripe.com/v1/charges', { method: 'POST' })
 ```
 
-- Emits `external.call` events with `service` (hostname) and `operation` (`METHOD /pathname`)
+- Emits `external.call` events with `service` (hostname), `operation` (`METHOD /pathname`), and span linkage (`spanId`, optional `parentSpanId`)
 - `duration_ms` measures time-to-headers (TTFB) — the Response body is returned untouched for streaming
 - Handles all three fetch input types: `string`, `URL`, `Request`
+- Can inject outbound `traceparent` headers using `propagateTo` (default: same-origin only in browser, disabled elsewhere)
 - Non-2xx responses return normally (not thrown); network errors re-throw after emitting
+
+## Browser Trace Context
+
+Use the browser helpers to continue the same trace from UI requests into server adapters.
+
+```typescript
+import { createBrowserTraceContext, createBrowserTracedFetch } from 'agent-telemetry/browser'
+
+const trace = createBrowserTraceContext({
+  // Optional SSR bootstrap: <meta name="traceparent" content="00-...">
+  initialTraceparent: document.querySelector('meta[name="traceparent"]')?.getAttribute('content'),
+})
+
+const fetch = createBrowserTracedFetch({
+  trace,
+  // Default is same-origin only. Keep this allowlist strict.
+  propagateTo: (url) => url.origin === window.location.origin,
+})
+
+await fetch('/api/users')
+```
+
+- `createBrowserTraceContext()` bootstraps from `initialTraceparent`, then `<meta name="traceparent">`, then fresh IDs
+- `createBrowserTracedFetch()` injects W3C `traceparent` on allowed requests and can adopt response `traceparent`
+- `trace.withSpan(name, fn)` creates a child span for user actions and restores the previous parent span after completion
 
 ## Prisma Adapter
 
@@ -213,7 +243,7 @@ const prisma = new PrismaClient().$extends(createPrismaTrace({
 }))
 ```
 
-- Emits `db.query` events with `provider: "prisma"`, `model` (e.g. `"User"`), and `operation` (e.g. `"findMany"`)
+- Emits `db.query` events with `provider: "prisma"`, `model` (e.g. `"User"`), `operation` (e.g. `"findMany"`), and span linkage (`spanId`, optional `parentSpanId`)
 - Requires Prisma 5.0.0+ (stable `$extends` API)
 - No access to raw SQL at the query extension level — model and operation names only
 
@@ -239,7 +269,7 @@ app.post('/api/users/:id', (req, res) => {
 })
 ```
 
-- Emits `http.request` events with method, path (query string stripped), status, duration, entities
+- Emits `http.request` events with method, path (query string stripped), status, duration, entities, and span linkage
 - Parses/sets W3C `traceparent` header for propagation
 - Uses `req.route.path` for parameterized patterns (e.g. `/users/:id`), falls back to `req.originalUrl`
 - Handles both `res.on("finish")` and `res.on("close")` to capture aborted requests
@@ -260,7 +290,7 @@ app.register(createFastifyTrace({
 }))
 ```
 
-- Emits `http.request` events using `reply.elapsedTime` for high-resolution duration
+- Emits `http.request` events using `reply.elapsedTime` for high-resolution duration, including span linkage
 - Strips query strings from emitted `path` values
 - Parses/sets W3C `traceparent` header for propagation
 - Uses `request.routeOptions.url` for parameterized route patterns

@@ -24,8 +24,14 @@
  */
 
 import { toSafeErrorLabel } from "../error.ts";
-import { generateSpanId, generateTraceId } from "../ids.ts";
-import type { DbQueryEvent, ExternalCallEvent, SupabaseEvents, Telemetry } from "../types.ts";
+import { startSpan } from "../trace-context.ts";
+import type {
+	DbQueryEvent,
+	ExternalCallEvent,
+	SupabaseEvents,
+	Telemetry,
+	TraceContext,
+} from "../types.ts";
 
 /** Callable fetch signature (without static properties like `preconnect`). */
 export type FetchFn = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
@@ -37,7 +43,7 @@ export interface SupabaseTraceOptions {
 	/** Base fetch implementation. Default: globalThis.fetch. */
 	baseFetch?: FetchFn;
 	/** Provide trace context for correlating with a parent HTTP request. */
-	getTraceContext?: () => { traceId: string; parentSpanId?: string } | undefined;
+	getTraceContext?: () => TraceContext | undefined;
 	/** Guard function — return false to skip tracing. */
 	isEnabled?: () => boolean;
 }
@@ -180,8 +186,11 @@ export function createSupabaseTrace(options: SupabaseTraceOptions): FetchFn {
 		const classification = classifyRequest(parsed, method);
 
 		const ctx = getTraceContext?.();
-		const traceId = ctx?.traceId ?? generateTraceId();
-		const spanId = generateSpanId();
+		const span = startSpan({
+			traceId: ctx?.traceId,
+			parentSpanId: ctx?.parentSpanId,
+			traceFlags: ctx?.traceFlags,
+		});
 
 		const start = performance.now();
 
@@ -193,8 +202,9 @@ export function createSupabaseTrace(options: SupabaseTraceOptions): FetchFn {
 			if (classification.kind === "db.query") {
 				const event: DbQueryEvent = {
 					kind: "db.query",
-					traceId,
-					spanId,
+					traceId: span.traceId,
+					spanId: span.spanId,
+					parentSpanId: span.parentSpanId,
 					provider: classification.provider,
 					model: classification.model,
 					operation: classification.operation,
@@ -205,8 +215,9 @@ export function createSupabaseTrace(options: SupabaseTraceOptions): FetchFn {
 			} else {
 				const event: ExternalCallEvent = {
 					kind: "external.call",
-					traceId,
-					spanId,
+					traceId: span.traceId,
+					spanId: span.spanId,
+					parentSpanId: span.parentSpanId,
 					service: classification.service,
 					operation: classification.operation,
 					duration_ms,
@@ -222,8 +233,9 @@ export function createSupabaseTrace(options: SupabaseTraceOptions): FetchFn {
 			if (classification.kind === "db.query") {
 				const event: DbQueryEvent = {
 					kind: "db.query",
-					traceId,
-					spanId,
+					traceId: span.traceId,
+					spanId: span.spanId,
+					parentSpanId: span.parentSpanId,
 					provider: classification.provider,
 					model: classification.model,
 					operation: classification.operation,
@@ -235,8 +247,9 @@ export function createSupabaseTrace(options: SupabaseTraceOptions): FetchFn {
 			} else {
 				const event: ExternalCallEvent = {
 					kind: "external.call",
-					traceId,
-					spanId,
+					traceId: span.traceId,
+					spanId: span.spanId,
+					parentSpanId: span.parentSpanId,
 					service: classification.service,
 					operation: classification.operation,
 					duration_ms,

@@ -141,6 +141,9 @@ describe("createExpressTrace", () => {
 
 		const event = emitted[0] as Record<string, unknown>;
 		expect(event.traceId).toBe(incomingTraceId);
+		expect(event.parentSpanId).toBe(incomingParentId);
+		expect(typeof event.spanId).toBe("string");
+		expect((event.spanId as string).length).toBe(16);
 	});
 
 	it("uses req.originalUrl for path", () => {

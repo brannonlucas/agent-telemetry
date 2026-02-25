@@ -18,8 +18,8 @@
  */
 
 import { toSafeErrorLabel } from "../error.ts";
-import { generateSpanId, generateTraceId } from "../ids.ts";
-import type { DbQueryEvent, Telemetry } from "../types.ts";
+import { startSpan } from "../trace-context.ts";
+import type { DbQueryEvent, Telemetry, TraceContext } from "../types.ts";
 
 /** Options for the Prisma trace extension. */
 export interface PrismaTraceOptions {
@@ -28,7 +28,7 @@ export interface PrismaTraceOptions {
 	/** Guard function — return false to skip tracing. */
 	isEnabled?: () => boolean;
 	/** Provide parent trace context for correlating with an incoming request. */
-	getTraceContext?: () => { traceId: string } | undefined;
+	getTraceContext?: () => TraceContext | undefined;
 }
 
 /** Callback params passed by Prisma's $allOperations hook. */
@@ -67,8 +67,12 @@ export function createPrismaTrace(options: PrismaTraceOptions): PrismaTraceExten
 					}
 
 					const start = performance.now();
-					const traceId = getTraceContext?.()?.traceId ?? generateTraceId();
-					const spanId = generateSpanId();
+					const ctx = getTraceContext?.();
+					const span = startSpan({
+						traceId: ctx?.traceId,
+						parentSpanId: ctx?.parentSpanId,
+						traceFlags: ctx?.traceFlags,
+					});
 
 					try {
 						const result = await query(args);
@@ -76,8 +80,9 @@ export function createPrismaTrace(options: PrismaTraceOptions): PrismaTraceExten
 
 						const event: DbQueryEvent = {
 							kind: "db.query",
-							traceId,
-							spanId,
+							traceId: span.traceId,
+							spanId: span.spanId,
+							parentSpanId: span.parentSpanId,
 							provider: "prisma",
 							model,
 							operation,
@@ -92,8 +97,9 @@ export function createPrismaTrace(options: PrismaTraceOptions): PrismaTraceExten
 
 						const event: DbQueryEvent = {
 							kind: "db.query",
-							traceId,
-							spanId,
+							traceId: span.traceId,
+							spanId: span.spanId,
+							parentSpanId: span.parentSpanId,
 							provider: "prisma",
 							model,
 							operation,

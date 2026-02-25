@@ -19,8 +19,9 @@
  * ```
  */
 
-import { generateSpanId, generateTraceId } from "../ids.ts";
-import type { ExternalCallEvent, Telemetry } from "../types.ts";
+import { startSpan } from "../trace-context.ts";
+import { formatTraceparent } from "../traceparent.ts";
+import type { ExternalCallEvent, Telemetry, TraceContext } from "../types.ts";
 
 /** Callable fetch signature (without static properties like `preconnect`). */
 export type FetchFn = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
@@ -32,9 +33,28 @@ export interface TracedFetchOptions {
 	/** Base fetch implementation. Default: globalThis.fetch. */
 	baseFetch?: FetchFn;
 	/** Provide trace context for correlating with a parent HTTP request. */
-	getTraceContext?: () => { traceId: string; parentSpanId?: string } | undefined;
+	getTraceContext?: () => TraceContext | undefined;
+	/** Predicate controlling where to forward `traceparent` headers. */
+	propagateTo?: (url: URL) => boolean;
+	/** Optional callback invoked when responses include `traceparent`. */
+	onResponseTraceparent?: (traceparent: string) => void;
 	/** Guard function — return false to skip tracing. */
 	isEnabled?: () => boolean;
+}
+
+function getLocationOrigin(): string | undefined {
+	const globalWithLocation = globalThis as { location?: { origin?: string } };
+	return globalWithLocation.location?.origin;
+}
+
+function resolveUrl(url: string): URL {
+	const base = getLocationOrigin() ?? "http://localhost";
+	return new URL(url, base);
+}
+
+function defaultPropagateTo(url: URL): boolean {
+	const origin = getLocationOrigin();
+	return origin != null && url.origin === origin;
 }
 
 /**
@@ -62,16 +82,40 @@ function resolveInput(input: RequestInfo | URL): {
 	}
 }
 
+function injectTraceparent(
+	input: RequestInfo | URL,
+	init: RequestInit | undefined,
+	traceparent: string,
+): { input: RequestInfo | URL; init: RequestInit | undefined } {
+	if (input instanceof Request) {
+		const request = new Request(input, init);
+		const headers = new Headers(request.headers);
+		headers.set("traceparent", traceparent);
+		return { input: new Request(request, { headers }), init: undefined };
+	}
+
+	const headers = new Headers(init?.headers);
+	headers.set("traceparent", traceparent);
+	return { input, init: { ...init, headers } };
+}
+
 /**
  * Create a traced fetch function that emits external.call telemetry events.
  *
  * The returned function has the same signature as globalThis.fetch.
- * The original input and init are passed through to baseFetch untouched.
+ * Request inputs are only cloned when header propagation is enabled.
  * Non-2xx responses are returned normally (not thrown). Network errors
  * are emitted as status "error" and re-thrown.
  */
 export function createTracedFetch(options: TracedFetchOptions): FetchFn {
-	const { telemetry, baseFetch = globalThis.fetch, getTraceContext, isEnabled } = options;
+	const {
+		telemetry,
+		baseFetch = globalThis.fetch,
+		getTraceContext,
+		propagateTo,
+		onResponseTraceparent,
+		isEnabled,
+	} = options;
 
 	return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
 		if (isEnabled && !isEnabled()) {
@@ -79,34 +123,42 @@ export function createTracedFetch(options: TracedFetchOptions): FetchFn {
 		}
 
 		const { url, method: resolvedMethod } = resolveInput(input);
-		const method = init?.method?.toUpperCase() ?? resolvedMethod;
+		const method = init?.method?.toUpperCase() ?? resolvedMethod.toUpperCase();
+		const parsedUrl = resolveUrl(url);
 
-		let service = "unknown";
-		let pathname = "/";
-		try {
-			const parsed = new URL(url);
-			service = parsed.hostname;
-			pathname = parsed.pathname;
-		} catch {
-			// keep defaults
-		}
+		const service = parsedUrl.hostname;
+		const pathname = parsedUrl.pathname;
 
 		const operation = `${method} ${pathname}`;
 
 		const ctx = getTraceContext?.();
-		const traceId = ctx?.traceId ?? generateTraceId();
-		const spanId = generateSpanId();
+		const span = startSpan({
+			traceId: ctx?.traceId,
+			parentSpanId: ctx?.parentSpanId,
+			traceFlags: ctx?.traceFlags,
+		});
+		const traceparent = formatTraceparent(span.traceId, span.spanId, span.traceFlags);
+
+		const shouldPropagate = (propagateTo ?? defaultPropagateTo)(parsedUrl);
+		const outbound = shouldPropagate
+			? injectTraceparent(input, init, traceparent)
+			: { input, init };
 
 		const start = performance.now();
 
 		try {
-			const response = await baseFetch(input, init);
+			const response = await baseFetch(outbound.input, outbound.init);
 			const duration_ms = Math.round(performance.now() - start);
+			const responseTraceparent = response.headers.get("traceparent");
+			if (responseTraceparent) {
+				onResponseTraceparent?.(responseTraceparent);
+			}
 
 			telemetry.emit({
 				kind: "external.call",
-				traceId,
-				spanId,
+				traceId: span.traceId,
+				spanId: span.spanId,
+				parentSpanId: span.parentSpanId,
 				service,
 				operation,
 				duration_ms,
@@ -119,8 +171,9 @@ export function createTracedFetch(options: TracedFetchOptions): FetchFn {
 
 			telemetry.emit({
 				kind: "external.call",
-				traceId,
-				spanId,
+				traceId: span.traceId,
+				spanId: span.spanId,
+				parentSpanId: span.parentSpanId,
 				service,
 				operation,
 				duration_ms,

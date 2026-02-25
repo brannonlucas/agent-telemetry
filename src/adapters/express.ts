@@ -17,8 +17,8 @@
  */
 
 import { extractEntities } from "../entities.ts";
-import { generateSpanId, generateTraceId } from "../ids.ts";
-import { formatTraceparent, parseTraceparent } from "../traceparent.ts";
+import { startSpanFromTraceparent } from "../trace-context.ts";
+import { formatTraceparent } from "../traceparent.ts";
 import type { EntityPattern, HttpRequestEvent, Telemetry } from "../types.ts";
 
 // ============================================================================
@@ -52,7 +52,7 @@ export type ExpressMiddleware = (
 // Request-Scoped Trace Storage
 // ============================================================================
 
-const traceStore = new WeakMap<object, { traceId: string; spanId: string }>();
+const traceStore = new WeakMap<object, { traceId: string; spanId: string; traceFlags: string }>();
 
 function stripQueryAndFragment(url: string): string {
 	const queryIdx = url.indexOf("?");
@@ -104,12 +104,14 @@ export function createExpressTrace(options: ExpressTraceOptions): ExpressMiddlew
 		const incoming = Array.isArray(req.headers.traceparent)
 			? req.headers.traceparent[0]
 			: req.headers.traceparent;
-		const parsed = parseTraceparent(incoming);
-		const traceId = parsed?.traceId ?? generateTraceId();
-		const spanId = generateSpanId();
+		const span = startSpanFromTraceparent(incoming);
 
-		traceStore.set(req, { traceId, spanId });
-		res.setHeader("traceparent", formatTraceparent(traceId, spanId));
+		traceStore.set(req, {
+			traceId: span.traceId,
+			spanId: span.spanId,
+			traceFlags: span.traceFlags,
+		});
+		res.setHeader("traceparent", formatTraceparent(span.traceId, span.spanId, span.traceFlags));
 
 		const start = performance.now();
 		let emitted = false;
@@ -124,7 +126,9 @@ export function createExpressTrace(options: ExpressTraceOptions): ExpressMiddlew
 
 			const event: HttpRequestEvent = {
 				kind: "http.request",
-				traceId,
+				traceId: span.traceId,
+				spanId: span.spanId,
+				parentSpanId: span.parentSpanId,
 				method: req.method,
 				path,
 				status: res.statusCode,
@@ -169,8 +173,16 @@ export function createExpressTrace(options: ExpressTraceOptions): ExpressMiddlew
  */
 export function getTraceContext(
 	req: object,
-): { _trace: { traceId: string; parentSpanId: string } } | Record<string, never> {
+):
+	| { _trace: { traceId: string; parentSpanId: string; traceFlags?: string } }
+	| Record<string, never> {
 	const stored = traceStore.get(req);
 	if (!stored) return {};
-	return { _trace: { traceId: stored.traceId, parentSpanId: stored.spanId } };
+	return {
+		_trace: {
+			traceId: stored.traceId,
+			parentSpanId: stored.spanId,
+			traceFlags: stored.traceFlags,
+		},
+	};
 }

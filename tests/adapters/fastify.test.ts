@@ -78,6 +78,9 @@ describe("createFastifyTrace", () => {
 
 		const event = emitted[0];
 		expect(event.traceId).toBe(incomingTraceId);
+		expect(event.parentSpanId).toBe(incomingParentId);
+		expect(typeof event.spanId).toBe("string");
+		expect(event.spanId?.length).toBe(16);
 	});
 
 	it("strips query string from emitted path", async () => {

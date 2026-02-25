@@ -169,9 +169,10 @@ describe("createPrismaTrace", () => {
 		const telemetry = { emit: (e: unknown) => emitted.push(e) };
 
 		const parentTraceId = "a".repeat(32);
+		const parentSpanId = "b".repeat(16);
 		const extension = createPrismaTrace({
 			telemetry: telemetry as { emit: (e: DbQueryEvent) => void },
-			getTraceContext: () => ({ traceId: parentTraceId }),
+			getTraceContext: () => ({ traceId: parentTraceId, parentSpanId, traceFlags: "01" }),
 		});
 
 		await callAdapter(extension, {
@@ -183,6 +184,7 @@ describe("createPrismaTrace", () => {
 
 		const event = emitted[0] as Record<string, unknown>;
 		expect(event.traceId).toBe(parentTraceId);
+		expect(event.parentSpanId).toBe(parentSpanId);
 	});
 
 	it("generates fresh traceId when no context", async () => {

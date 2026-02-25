@@ -9,7 +9,9 @@ const mockFetch: FetchFn = async () => new Response("ok", { status: 200 });
 function createTestHarness(overrides?: {
 	baseFetch?: FetchFn;
 	isEnabled?: () => boolean;
-	getTraceContext?: () => { traceId: string; parentSpanId?: string } | undefined;
+	getTraceContext?: () =>
+		| { traceId: string; parentSpanId: string; traceFlags?: string }
+		| undefined;
 }) {
 	const emitted: unknown[] = [];
 	const telemetry = { emit: (e: unknown) => emitted.push(e) };
@@ -289,6 +291,7 @@ describe("createSupabaseTrace", () => {
 
 			const event = emitted[0] as Record<string, unknown>;
 			expect(event.traceId).toBe("a".repeat(32));
+			expect(event.parentSpanId).toBe("b".repeat(16));
 		});
 
 		it("uses custom baseFetch", async () => {

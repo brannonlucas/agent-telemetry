@@ -82,6 +82,30 @@ describe("createHonoTrace", () => {
 		expect(typeof event.duration_ms).toBe("number");
 	});
 
+	it("emits span linkage from incoming traceparent", async () => {
+		const emitted: unknown[] = [];
+		const telemetry = { emit: (e: unknown) => emitted.push(e) };
+		const trace = createHonoTrace({
+			telemetry: telemetry as { emit: (e: unknown) => void },
+		});
+
+		const app = new Hono();
+		app.use("*", trace);
+		app.get("/api/test", (c) => c.text("ok"));
+
+		const incomingTraceId = "a".repeat(32);
+		const incomingParentId = "b".repeat(16);
+		const incoming = `00-${incomingTraceId}-${incomingParentId}-01`;
+
+		await app.request("/api/test", { headers: { traceparent: incoming } });
+
+		const event = emitted[0] as Record<string, unknown>;
+		expect(event.traceId).toBe(incomingTraceId);
+		expect(event.parentSpanId).toBe(incomingParentId);
+		expect(typeof event.spanId).toBe("string");
+		expect((event.spanId as string).length).toBe(16);
+	});
+
 	it("extracts entities when patterns are provided", async () => {
 		const emitted: unknown[] = [];
 		const telemetry = { emit: (e: unknown) => emitted.push(e) };

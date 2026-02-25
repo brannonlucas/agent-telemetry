@@ -22,6 +22,8 @@ export interface BaseTelemetryEvent {
 
 export interface HttpRequestEvent extends BaseTelemetryEvent {
 	kind: "http.request";
+	spanId?: string;
+	parentSpanId?: string;
 	method: string;
 	path: string;
 	status: number;
@@ -72,6 +74,7 @@ export type JobEvents = JobStartEvent | JobEndEvent | JobDispatchEvent | JobStep
 export interface ExternalCallEvent extends BaseTelemetryEvent {
 	kind: "external.call";
 	spanId: string;
+	parentSpanId?: string;
 	service: string;
 	operation: string;
 	duration_ms: number;
@@ -84,6 +87,7 @@ export type ExternalEvents = ExternalCallEvent;
 export interface DbQueryEvent extends BaseTelemetryEvent {
 	kind: "db.query";
 	spanId: string;
+	parentSpanId?: string;
 	/** Provider identifier (e.g. "prisma", "supabase", "drizzle"). */
 	provider: string;
 	/** The data entity being operated on — ORM model name or database table. */
