@@ -58,6 +58,33 @@ describe("createBrowserTraceContext", () => {
 });
 
 describe("createBrowserTracedFetch", () => {
+	it("injects traceparent for same-origin relative URL with default policy", async () => {
+		const globalWithLocation = globalThis as { location?: { origin?: string } };
+		const previousLocation = globalWithLocation.location;
+		globalWithLocation.location = { origin: "https://app.example.com" };
+
+		try {
+			let observedTraceparent: string | null = null;
+			const baseFetch: FetchFn = async (input, init) => {
+				observedTraceparent = readTraceparentHeader(input, init);
+				return new Response("ok", { status: 200 });
+			};
+			const trace = createBrowserTraceContext({
+				initialTraceparent: `00-${"a".repeat(32)}-${"b".repeat(16)}-01`,
+			});
+			const fetch = createBrowserTracedFetch({
+				baseFetch,
+				trace,
+			});
+
+			await fetch("/api/users");
+
+			expect(observedTraceparent).toMatch(/^00-[\da-f]{32}-[\da-f]{16}-[\da-f]{2}$/);
+		} finally {
+			globalWithLocation.location = previousLocation;
+		}
+	});
+
 	it("injects traceparent when propagation predicate allows URL", async () => {
 		let observedTraceparent: string | null = null;
 		const baseFetch: FetchFn = async (input, init) => {

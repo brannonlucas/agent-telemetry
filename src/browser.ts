@@ -1,73 +1,21 @@
+import {
+	type FetchFn,
+	defaultPropagateTo,
+	injectTraceparent,
+	resolveInput,
+	resolveUrl,
+} from "./fetch-utils.ts";
 import { generateSpanId, generateTraceId } from "./ids.ts";
-import { startSpan } from "./trace-context.ts";
+import { normalizeTraceFlags, startSpan } from "./trace-context.ts";
 import { formatTraceparent, parseTraceparent } from "./traceparent.ts";
 import type { TraceContext } from "./types.ts";
 
-const TRACE_FLAGS_RE = /^[\da-f]{2}$/;
-
-/** Callable fetch signature (without static properties like `preconnect`). */
-export type FetchFn = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+export type { FetchFn } from "./fetch-utils.ts";
 
 interface BrowserTraceState {
 	traceId: string;
 	parentSpanId: string;
 	traceFlags: string;
-}
-
-function normalizeTraceFlags(traceFlags: string | undefined): string {
-	if (!traceFlags) return "01";
-	const normalized = traceFlags.toLowerCase();
-	return TRACE_FLAGS_RE.test(normalized) ? normalized : "01";
-}
-
-function getLocationOrigin(): string | undefined {
-	const globalWithLocation = globalThis as { location?: { origin?: string } };
-	return globalWithLocation.location?.origin;
-}
-
-function resolveInput(input: RequestInfo | URL): {
-	url: string;
-} {
-	if (input instanceof Request) {
-		return { url: input.url };
-	}
-	if (input instanceof URL) {
-		return { url: input.href };
-	}
-	try {
-		return { url: new URL(input).href };
-	} catch {
-		return {
-			url: new URL(input, getLocationOrigin() ?? "http://localhost").href,
-		};
-	}
-}
-
-function resolveUrl(url: string): URL {
-	const base = getLocationOrigin() ?? "http://localhost";
-	return new URL(url, base);
-}
-
-function injectTraceparent(
-	input: RequestInfo | URL,
-	init: RequestInit | undefined,
-	traceparent: string,
-): { input: RequestInfo | URL; init: RequestInit | undefined } {
-	if (input instanceof Request) {
-		const request = new Request(input, init);
-		const headers = new Headers(request.headers);
-		headers.set("traceparent", traceparent);
-		return { input: new Request(request, { headers }), init: undefined };
-	}
-
-	const headers = new Headers(init?.headers);
-	headers.set("traceparent", traceparent);
-	return { input, init: { ...init, headers } };
-}
-
-function defaultPropagateTo(url: URL): boolean {
-	const origin = getLocationOrigin();
-	return origin != null && url.origin === origin;
 }
 
 function readMetaTraceparent(metaName: string): string | undefined {

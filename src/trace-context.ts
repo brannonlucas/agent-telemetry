@@ -3,7 +3,7 @@ import { parseTraceparent } from "./traceparent.ts";
 
 const TRACE_FLAGS_RE = /^[\da-f]{2}$/;
 
-function normalizeTraceFlags(traceFlags: string | undefined): string {
+export function normalizeTraceFlags(traceFlags: string | undefined): string {
 	if (!traceFlags) return "01";
 	const normalized = traceFlags.toLowerCase();
 	return TRACE_FLAGS_RE.test(normalized) ? normalized : "01";

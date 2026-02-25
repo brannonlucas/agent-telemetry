@@ -24,6 +24,7 @@
  */
 
 import { toSafeErrorLabel } from "../error.ts";
+import { type FetchFn, resolveInput } from "../fetch-utils.ts";
 import { startSpan } from "../trace-context.ts";
 import type {
 	DbQueryEvent,
@@ -33,8 +34,7 @@ import type {
 	TraceContext,
 } from "../types.ts";
 
-/** Callable fetch signature (without static properties like `preconnect`). */
-export type FetchFn = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+export type { FetchFn } from "../fetch-utils.ts";
 
 /** Options for the Supabase trace adapter. */
 export interface SupabaseTraceOptions {
@@ -72,31 +72,6 @@ const REST_RE = /\/rest\/v\d+\/([^?/]+)/;
 const AUTH_RE = /\/auth\/v\d+\/(.+)/;
 const STORAGE_RE = /\/storage\/v\d+\/object\/([^/]+)/;
 const FUNCTIONS_RE = /\/functions\/v\d+\/([^?/]+)/;
-
-/**
- * Extract URL metadata from the three fetch input types.
- * This is metadata-only — the original input is never modified (C3/C4).
- */
-function resolveInput(input: RequestInfo | URL): {
-	url: string;
-	method: string;
-} {
-	if (input instanceof Request) {
-		return { url: input.url, method: input.method };
-	}
-	if (input instanceof URL) {
-		return { url: input.href, method: "GET" };
-	}
-	// string
-	try {
-		return { url: new URL(input).href, method: "GET" };
-	} catch {
-		return {
-			url: new URL(input, "http://localhost").href,
-			method: "GET",
-		};
-	}
-}
 
 /**
  * Classify a Supabase request URL into the appropriate event type.
