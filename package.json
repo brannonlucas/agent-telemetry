@@ -1,6 +1,6 @@
 {
 	"name": "agent-telemetry",
-	"version": "0.1.0",
+	"version": "0.2.0",
 	"description": "Lightweight JSONL telemetry for AI agent backends. Zero deps, framework adapters included.",
 	"type": "module",
 	"exports": {
