@@ -2,7 +2,7 @@
 
 Lightweight JSONL telemetry for easier AI agent consumption. Zero runtime dependencies.
 
-Writes structured telemetry events to rotating JSONL files in development. Falls back to `console.log` in runtimes without filesystem access (Cloudflare Workers). Includes framework adapters for Hono, Inngest, Express, Fastify, Prisma, Supabase, a generic traced fetch wrapper, and browser trace-context helpers.
+Writes structured telemetry events to rotating JSONL files in development. Falls back to `console.log` in runtimes without filesystem access (Cloudflare Workers). Includes framework adapters for Hono, Inngest, Express, Fastify, Next.js, Prisma, Supabase, a generic traced fetch wrapper, and browser trace-context helpers.
 
 ## Install
 
@@ -60,6 +60,7 @@ Inbound HTTP  →  Database Queries  →  External API Calls  →  Background Jo
   Hono            Prisma               Traced Fetch           Inngest
   Express         Supabase (PostgREST)  Supabase (auth/
   Fastify                                storage/functions)
+  Next.js
 ```
 
 One `traceId` follows a request from the HTTP boundary through database queries, external API calls, and into background job execution. `spanId`/`parentSpanId` fields preserve parent-child relationships inside that trace. HTTP adapters use the [W3C `traceparent`](https://www.w3.org/TR/trace-context/) header for propagation, enabling interop with OpenTelemetry and other standards-compliant tools. Query your JSONL logs by `traceId` to see the full chain.
@@ -310,6 +311,54 @@ app.register(createFastifyTrace({
 - Parses/sets W3C `traceparent` header for propagation
 - Uses `request.routeOptions.url` for parameterized route patterns
 - Requires Fastify 4.0.0+ (`reply.elapsedTime` not available in 3.x)
+
+## Next.js Adapter
+
+Next.js middleware and route handlers run in separate execution contexts, so tracing is split into two pieces: middleware handles trace propagation, route handler wrappers handle timing and event emission. No `next` runtime dependency.
+
+**Middleware** — injects `traceparent` into request headers for downstream route handlers:
+
+```typescript
+// middleware.ts
+import { createNextMiddleware } from 'agent-telemetry/next'
+
+const traceMiddleware = createNextMiddleware()
+
+export function middleware(request: NextRequest) {
+  return traceMiddleware(request)
+}
+```
+
+**Route handlers** — reads `traceparent`, measures duration, emits `http.request` events:
+
+```typescript
+// app/api/users/route.ts
+import { withNextTrace } from 'agent-telemetry/next'
+
+export const GET = withNextTrace(async (request) => {
+  const users = await db.query('SELECT * FROM users')
+  return Response.json(users)
+}, { telemetry })
+```
+
+**Server Actions** — wraps actions with `method: "ACTION"` events:
+
+```typescript
+// app/actions.ts
+'use server'
+import { withActionTrace } from 'agent-telemetry/next'
+
+export const createPost = withActionTrace(async (formData: FormData) => {
+  // ...
+}, { telemetry, name: 'createPost' })
+```
+
+- `createNextMiddleware()` parses incoming `traceparent` (or generates fresh IDs), creates a child span, and forwards the new `traceparent` via `NextResponse.next({ request: { headers } })`
+- `withNextTrace(handler, options)` reads the propagated `traceparent`, times the handler with `performance.now()`, and emits `http.request` with method, path, status, duration, entities, and span linkage
+- `withActionTrace(action, options)` creates a standalone span and emits events with `method: "ACTION"` and `path: actionName`
+- `getTraceContext(request)` parses `traceparent` from request headers and returns `{ _trace: { traceId, parentSpanId, traceFlags } }` for passing to fetch/prisma/supabase adapters
+- Supports `entityPatterns` and `isEnabled` options on route handler wrappers (same as other HTTP adapters)
+- Uses only Web APIs (Headers, Response, performance.now) — works in both Node and Edge runtimes
 
 ## Supabase Adapter
 
