@@ -11,7 +11,10 @@ export type FetchFn = (input: RequestInfo | URL, init?: RequestInit) => Promise<
 
 export function getLocationOrigin(): string | undefined {
 	const globalWithLocation = globalThis as { location?: { origin?: string } };
-	return globalWithLocation.location?.origin;
+	const origin = globalWithLocation.location?.origin;
+	// about:blank pages (and test environments like happy-dom) set origin to the string "null"
+	if (!origin || origin === "null") return undefined;
+	return origin;
 }
 
 export function resolveUrl(url: string): URL {

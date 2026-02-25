@@ -15,5 +15,5 @@
 		"sourceMap": true,
 		"types": ["bun-types"]
 	},
-	"include": ["src/**/*.ts", "tests/**/*.ts"]
+	"include": ["src/**/*.ts", "tests/**/*.ts", "demo/**/*.ts"]
 }

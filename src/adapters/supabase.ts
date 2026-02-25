@@ -84,7 +84,7 @@ function classifyRequest(url: URL, method: string): Classification {
 	// PostgREST: /rest/v{N}/{table}
 	const restMatch = REST_RE.exec(pathname);
 	if (restMatch) {
-		const table = restMatch[1];
+		const table = restMatch[1] as string;
 		const operation = METHOD_TO_OPERATION[method] ?? method.toLowerCase();
 		return {
 			kind: "db.query",
@@ -100,7 +100,7 @@ function classifyRequest(url: URL, method: string): Classification {
 		return {
 			kind: "external.call",
 			service: "supabase-auth",
-			operation: authMatch[1],
+			operation: authMatch[1] as string,
 		};
 	}
 
@@ -110,7 +110,7 @@ function classifyRequest(url: URL, method: string): Classification {
 		return {
 			kind: "external.call",
 			service: "supabase-storage",
-			operation: `${method} ${storageMatch[1]}`,
+			operation: `${method} ${storageMatch[1] as string}`,
 		};
 	}
 
@@ -120,7 +120,7 @@ function classifyRequest(url: URL, method: string): Classification {
 		return {
 			kind: "external.call",
 			service: "supabase-functions",
-			operation: functionsMatch[1],
+			operation: functionsMatch[1] as string,
 		};
 	}
 

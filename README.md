@@ -12,6 +12,21 @@ bun add agent-telemetry
 
 > **Node.js users:** This package ships TypeScript source (no build step). You'll need a bundler that handles `.ts` imports (esbuild, tsup, Vite, etc.).
 
+## Demo App
+
+This repo includes a runnable browser-to-backend demo in [`demo/`](./demo).
+
+```bash
+bun run demo
+```
+
+Then open [http://localhost:3001](http://localhost:3001) and click **Run Demo Request**.
+Telemetry is written to `logs/demo/telemetry.jsonl`.
+The demo emits correlated `http.request`, `db.query`, and `external.call` events.
+The demo page includes a built-in Recent Telemetry panel and a temporal trace timeline view, and you can follow logs with `bun run demo:tail`.
+The timeline uses configurable synthetic delays so spans are easier to distinguish visually.
+The demo binds to `127.0.0.1` by default; set `DEMO_HOST=0.0.0.0` if you explicitly want LAN access.
+
 ## Quick Start
 
 ```typescript

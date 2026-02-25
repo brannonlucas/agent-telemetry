@@ -5,6 +5,7 @@ path = "/Users/brannonlucas/.gitleaks-config/.gitleaks.toml"
 description = "Test data and doc example allowlist"
 paths = [
   '''tests/.*\.test\.ts''',
+  '''demo/.*\.ts''',
 ]
 
 [[rules]]

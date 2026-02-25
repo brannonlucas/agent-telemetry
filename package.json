@@ -1,6 +1,6 @@
 {
 	"name": "agent-telemetry",
-	"version": "0.3.0",
+	"version": "0.4.0",
 	"description": "Lightweight JSONL telemetry for AI agent backends. Zero deps, framework adapters included.",
 	"type": "module",
 	"exports": {
@@ -46,7 +46,9 @@
 		"test": "bun test",
 		"typecheck": "tsc --noEmit",
 		"lint": "biome check .",
-		"check": "bun run typecheck && bun run lint && bun test"
+		"check": "bun run typecheck && bun run lint && bun test",
+		"demo": "bun demo/server.ts",
+		"demo:tail": "tail -n 100 -f logs/demo/telemetry.jsonl"
 	},
 	"peerDependencies": {
 		"fastify": ">=4.0.0",
