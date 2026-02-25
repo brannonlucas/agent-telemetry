@@ -1,6 +1,6 @@
 {
 	"name": "agent-telemetry",
-	"version": "0.4.0",
+	"version": "0.5.0",
 	"description": "Lightweight JSONL telemetry for AI agent backends. Zero deps, framework adapters included.",
 	"type": "module",
 	"exports": {
@@ -32,6 +32,10 @@
 			"import": "./src/adapters/fastify.ts",
 			"types": "./src/adapters/fastify.ts"
 		},
+		"./next": {
+			"import": "./src/adapters/next.ts",
+			"types": "./src/adapters/next.ts"
+		},
 		"./supabase": {
 			"import": "./src/adapters/supabase.ts",
 			"types": "./src/adapters/supabase.ts"
@@ -53,7 +57,8 @@
 	"peerDependencies": {
 		"fastify": ">=4.0.0",
 		"hono": ">=4.0.0",
-		"inngest": ">=3.0.0"
+		"inngest": ">=3.0.0",
+		"next": ">=14.0.0"
 	},
 	"peerDependenciesMeta": {
 		"fastify": {
@@ -63,6 +68,9 @@
 			"optional": true
 		},
 		"inngest": {
+			"optional": true
+		},
+		"next": {
 			"optional": true
 		}
 	},
@@ -92,6 +100,7 @@
 		"fetch",
 		"hono",
 		"inngest",
+		"nextjs",
 		"prisma",
 		"supabase"
 	]
