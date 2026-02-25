@@ -2,7 +2,7 @@
 
 Lightweight JSONL telemetry for AI agent backends. Zero runtime dependencies.
 
-Writes structured telemetry events to rotating JSONL files in development. Falls back to `console.log` in runtimes without filesystem access (Cloudflare Workers). Includes framework adapters for [Hono](https://hono.dev) and [Inngest](https://inngest.com).
+Writes structured telemetry events to rotating JSONL files in development. Falls back to `console.log` in runtimes without filesystem access (Cloudflare Workers). Includes framework adapters for Hono, Inngest, Express, Fastify, Prisma, Supabase, and a generic traced fetch wrapper.
 
 ## Install
 
@@ -38,21 +38,16 @@ Each call to `emit()` appends a JSON line to `logs/telemetry.jsonl` with an auto
 
 ## How It Works
 
-The library connects three layers of tracing — HTTP requests, event dispatch, and background jobs — through a shared `traceId`:
+The library connects every layer of your stack through a shared `traceId`:
 
 ```
-Browser → HTTP Request → Hono Middleware (parses/generates traceparent)
-                              ↓
-                         getTraceContext(c)  →  { _trace: { traceId, parentSpanId } }
-                              ↓
-                         inngest.send({ data: { ...payload, ...getTraceContext(c) } })
-                              ↓
-                         Inngest Middleware (reads _trace from event data)
-                              ↓
-                         job.start / job.end (same traceId)
+Inbound HTTP  →  Database Queries  →  External API Calls  →  Background Jobs
+  Hono            Prisma               Traced Fetch           Inngest
+  Express         Supabase (PostgREST)  Supabase (auth/
+  Fastify                                storage/functions)
 ```
 
-One `traceId` follows a request from the HTTP boundary through dispatch into background job execution. The Hono adapter uses the [W3C `traceparent`](https://www.w3.org/TR/trace-context/) header for propagation, enabling interop with OpenTelemetry and other standards-compliant tools. Query your JSONL logs by `traceId` to see the full chain.
+One `traceId` follows a request from the HTTP boundary through database queries, external API calls, and into background job execution. HTTP adapters use the [W3C `traceparent`](https://www.w3.org/TR/trace-context/) header for propagation, enabling interop with OpenTelemetry and other standards-compliant tools. Query your JSONL logs by `traceId` to see the full chain.
 
 ## Full-Stack Example
 
@@ -182,6 +177,120 @@ The middleware:
 - Reads `traceId` from the `_trace` field in `event.data` (set by `getTraceContext()` at the dispatch site)
 - Generates a new `traceId` when no `_trace` is present, so every function run is always traceable
 
+## Fetch Adapter
+
+Wraps any `fetch` call with telemetry. Does not monkey-patch the global — returns a new function with identical semantics.
+
+```typescript
+import { createTracedFetch } from 'agent-telemetry/fetch'
+
+const fetch = createTracedFetch({
+  telemetry,
+  baseFetch: globalThis.fetch,       // Optional — default: globalThis.fetch
+  getTraceContext: () => ctx,         // Optional — correlate with parent request
+  isEnabled: () => true,             // Optional guard
+})
+
+const res = await fetch('https://api.stripe.com/v1/charges', { method: 'POST' })
+```
+
+- Emits `external.call` events with `service` (hostname) and `operation` (`METHOD /pathname`)
+- `duration_ms` measures time-to-headers (TTFB) — the Response body is returned untouched for streaming
+- Handles all three fetch input types: `string`, `URL`, `Request`
+- Non-2xx responses return normally (not thrown); network errors re-throw after emitting
+
+## Prisma Adapter
+
+Traces all Prisma model operations via `$extends()`. No runtime `@prisma/client` import — the extension is structurally compatible.
+
+```typescript
+import { createPrismaTrace } from 'agent-telemetry/prisma'
+
+const prisma = new PrismaClient().$extends(createPrismaTrace({
+  telemetry,
+  getTraceContext: () => ctx,         // Optional — correlate with parent request
+  isEnabled: () => true,             // Optional guard
+}))
+```
+
+- Emits `db.query` events with `provider: "prisma"`, `model` (e.g. `"User"`), and `operation` (e.g. `"findMany"`)
+- Requires Prisma 5.0.0+ (stable `$extends` API)
+- No access to raw SQL at the query extension level — model and operation names only
+
+## Express Adapter
+
+Standard Express middleware with the same tracing pattern as Hono. No `express` or `@types/express` runtime dependency.
+
+```typescript
+import { createExpressTrace, getTraceContext } from 'agent-telemetry/express'
+
+app.use(createExpressTrace({
+  telemetry,
+  entityPatterns: [
+    { segment: 'users', key: 'userId' },
+  ],
+  isEnabled: () => true,
+}))
+
+app.post('/api/users/:id', (req, res) => {
+  // Propagate trace context to downstream services
+  const ctx = getTraceContext(req)
+  res.json({ ok: true })
+})
+```
+
+- Emits `http.request` events with method, path (query string stripped), status, duration, entities
+- Parses/sets W3C `traceparent` header for propagation
+- Uses `req.route.path` for parameterized patterns (e.g. `/users/:id`), falls back to `req.originalUrl`
+- Handles both `res.on("finish")` and `res.on("close")` to capture aborted requests
+
+## Fastify Adapter
+
+Fastify plugin using `onRequest`/`onResponse` hooks. No `fastify` runtime dependency — uses `Symbol.for("skip-override")` instead of `fastify-plugin`.
+
+```typescript
+import { createFastifyTrace, getTraceContext } from 'agent-telemetry/fastify'
+
+app.register(createFastifyTrace({
+  telemetry,
+  entityPatterns: [
+    { segment: 'users', key: 'userId' },
+  ],
+  isEnabled: () => true,
+}))
+```
+
+- Emits `http.request` events using `reply.elapsedTime` for high-resolution duration
+- Strips query strings from emitted `path` values
+- Parses/sets W3C `traceparent` header for propagation
+- Uses `request.routeOptions.url` for parameterized route patterns
+- Requires Fastify 4.0.0+ (`reply.elapsedTime` not available in 3.x)
+
+## Supabase Adapter
+
+A traced `fetch` that parses Supabase URL patterns to emit rich, service-aware telemetry. PostgREST calls become `db.query` events; auth/storage/functions calls become `external.call` events.
+
+```typescript
+import { createClient } from '@supabase/supabase-js'
+import { createSupabaseTrace } from 'agent-telemetry/supabase'
+
+const tracedFetch = createSupabaseTrace({ telemetry })
+const supabase = createClient(url, key, { global: { fetch: tracedFetch } })
+```
+
+URL pattern classification:
+
+| Pattern | Event | Fields |
+|---------|-------|--------|
+| `/rest/v{N}/{table}` | `db.query` | `model: table`, `operation: select\|insert\|update\|delete` |
+| `/auth/v{N}/{endpoint}` | `external.call` | `service: "supabase-auth"` |
+| `/storage/v{N}/object/{bucket}` | `external.call` | `service: "supabase-storage"` |
+| `/functions/v{N}/{name}` | `external.call` | `service: "supabase-functions"` |
+
+- Each `fetch` invocation emits one event — Supabase's built-in retry logic generates separate events per retry
+- Realtime (WebSocket) subscriptions are not intercepted (they don't use `fetch`)
+- Uses `Telemetry<SupabaseEvents>` (`DbQueryEvent | ExternalCallEvent` union)
+
 ## Configuration
 
 ```typescript
@@ -210,6 +319,8 @@ const telemetry = await createTelemetry({
 | `HttpEvents` | `http.request` | HTTP request/response telemetry |
 | `JobEvents` | `job.start`, `job.end`, `job.dispatch`, `job.step` | Background job lifecycle |
 | `ExternalEvents` | `external.call` | External service calls |
+| `DbEvents` | `db.query` | Database query telemetry |
+| `SupabaseEvents` | `db.query`, `external.call` | Supabase-specific union |
 | `PresetEvents` | All of the above | Combined preset union |
 
 ## Utilities
@@ -251,7 +362,7 @@ The writer automatically detects the runtime environment:
 
 Detection happens once during `createTelemetry()` — it probes the filesystem by creating the log directory and verifying it exists. Cloudflare's `nodejs_compat` stubs succeed silently on `mkdirSync` but fail the existence check, triggering the console fallback.
 
-The returned `emit()` function is synchronous and **never throws**, even with malformed data or filesystem errors. Telemetry must not crash the host application.
+The returned `emit()` function is synchronous, non-blocking, and **never throws**, even with malformed data or filesystem errors. Telemetry must not crash the host application.
 
 ## License
 

@@ -51,6 +51,8 @@ export async function createTelemetry<TEvent extends BaseTelemetryEvent = BaseTe
 // Re-export all public types
 export type {
 	BaseTelemetryEvent,
+	DbEvents,
+	DbQueryEvent,
 	EntityPattern,
 	ExternalCallEvent,
 	ExternalEvents,
@@ -62,6 +64,7 @@ export type {
 	JobStartEvent,
 	JobStepEvent,
 	PresetEvents,
+	SupabaseEvents,
 	Telemetry,
 	TelemetryConfig,
 	TraceContext,

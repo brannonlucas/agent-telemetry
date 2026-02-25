@@ -18,6 +18,7 @@
 
 import { InngestMiddleware } from "inngest";
 import { extractEntitiesFromEvent } from "../entities.ts";
+import { toSafeErrorLabel } from "../error.ts";
 import { generateSpanId, generateTraceId } from "../ids.ts";
 import type {
 	JobDispatchEvent,
@@ -86,9 +87,7 @@ export function createInngestTrace(options: InngestTraceOptions): InngestMiddlew
 								runId,
 								duration_ms,
 								status: hasError ? "error" : "success",
-								error: hasError
-									? ((result.error as Error)?.message ?? String(result.error))
-									: undefined,
+								error: hasError ? toSafeErrorLabel(result.error) : undefined,
 							};
 							telemetry.emit(endEvent);
 						},

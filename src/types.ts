@@ -81,8 +81,28 @@ export interface ExternalCallEvent extends BaseTelemetryEvent {
 /** All external service call events. */
 export type ExternalEvents = ExternalCallEvent;
 
+export interface DbQueryEvent extends BaseTelemetryEvent {
+	kind: "db.query";
+	spanId: string;
+	/** Provider identifier (e.g. "prisma", "supabase", "drizzle"). */
+	provider: string;
+	/** The data entity being operated on — ORM model name or database table. */
+	model?: string;
+	/** Operation name (e.g. "findMany", "create", "select", "insert"). */
+	operation: string;
+	duration_ms: number;
+	status: "success" | "error";
+	error?: string;
+}
+
+/** All database query events. */
+export type DbEvents = DbQueryEvent;
+
+/** Events emitted by the Supabase adapter (db.query for PostgREST, external.call for auth/storage/functions). */
+export type SupabaseEvents = DbQueryEvent | ExternalCallEvent;
+
 /** Union of all preset event types. */
-export type PresetEvents = HttpEvents | JobEvents | ExternalEvents;
+export type PresetEvents = HttpEvents | JobEvents | ExternalEvents | DbEvents;
 
 // ============================================================================
 // Entity Extraction

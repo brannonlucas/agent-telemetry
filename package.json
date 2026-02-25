@@ -15,11 +15,29 @@
 		"./inngest": {
 			"import": "./src/adapters/inngest.ts",
 			"types": "./src/adapters/inngest.ts"
+		},
+		"./fetch": {
+			"import": "./src/adapters/fetch.ts",
+			"types": "./src/adapters/fetch.ts"
+		},
+		"./prisma": {
+			"import": "./src/adapters/prisma.ts",
+			"types": "./src/adapters/prisma.ts"
+		},
+		"./express": {
+			"import": "./src/adapters/express.ts",
+			"types": "./src/adapters/express.ts"
+		},
+		"./fastify": {
+			"import": "./src/adapters/fastify.ts",
+			"types": "./src/adapters/fastify.ts"
+		},
+		"./supabase": {
+			"import": "./src/adapters/supabase.ts",
+			"types": "./src/adapters/supabase.ts"
 		}
 	},
-	"files": [
-		"src"
-	],
+	"files": ["src"],
 	"scripts": {
 		"test": "bun test",
 		"typecheck": "tsc --noEmit",
@@ -27,10 +45,14 @@
 		"check": "bun run typecheck && bun run lint && bun test"
 	},
 	"peerDependencies": {
+		"fastify": ">=4.0.0",
 		"hono": ">=4.0.0",
 		"inngest": ">=3.0.0"
 	},
 	"peerDependenciesMeta": {
+		"fastify": {
+			"optional": true
+		},
 		"hono": {
 			"optional": true
 		},
@@ -41,6 +63,7 @@
 	"devDependencies": {
 		"@biomejs/biome": "^1.9.0",
 		"@types/bun": "latest",
+		"fastify": "^5.7.4",
 		"hono": "^4.7.0",
 		"inngest": "^3.0.0",
 		"typescript": "^5.7.0"
@@ -58,7 +81,12 @@
 		"agent",
 		"ai",
 		"tracing",
+		"express",
+		"fastify",
+		"fetch",
 		"hono",
-		"inngest"
+		"inngest",
+		"prisma",
+		"supabase"
 	]
 }

@@ -10,15 +10,15 @@
 
 /** Parsed representation of a `traceparent` header. */
 export interface Traceparent {
-	version: string
-	traceId: string
-	parentId: string
-	traceFlags: string
+	version: string;
+	traceId: string;
+	parentId: string;
+	traceFlags: string;
 }
 
-const TRACEPARENT_RE = /^([\da-f]{2})-([\da-f]{32})-([\da-f]{16})-([\da-f]{2})$/
-const ALL_ZEROS_32 = '0'.repeat(32)
-const ALL_ZEROS_16 = '0'.repeat(16)
+const TRACEPARENT_RE = /^([\da-f]{2})-([\da-f]{32})-([\da-f]{16})-([\da-f]{2})$/;
+const ALL_ZEROS_32 = "0".repeat(32);
+const ALL_ZEROS_16 = "0".repeat(16);
 
 /**
  * Parse a `traceparent` header value.
@@ -27,21 +27,22 @@ const ALL_ZEROS_16 = '0'.repeat(16)
  * malformed, or violates the W3C spec (e.g. all-zero trace-id/parent-id).
  */
 export function parseTraceparent(header: string | undefined | null): Traceparent | null {
-	if (!header) return null
+	if (!header) return null;
 
-	const match = TRACEPARENT_RE.exec(header.trim().toLowerCase())
-	if (!match) return null
+	const match = TRACEPARENT_RE.exec(header.trim().toLowerCase());
+	if (!match) return null;
 
 	// Captures are guaranteed by the regex match above
-	const version = match[1] as string
-	const traceId = match[2] as string
-	const parentId = match[3] as string
-	const traceFlags = match[4] as string
+	const version = match[1] as string;
+	const traceId = match[2] as string;
+	const parentId = match[3] as string;
+	const traceFlags = match[4] as string;
 
-	// W3C spec: all-zero trace-id and parent-id are invalid
-	if (traceId === ALL_ZEROS_32 || parentId === ALL_ZEROS_16) return null
+	// W3C spec: "ff" is invalid as the version, and all-zero IDs are invalid.
+	if (version === "ff") return null;
+	if (traceId === ALL_ZEROS_32 || parentId === ALL_ZEROS_16) return null;
 
-	return { version, traceId, parentId, traceFlags }
+	return { version, traceId, parentId, traceFlags };
 }
 
 /**
@@ -51,6 +52,6 @@ export function parseTraceparent(header: string | undefined | null): Traceparent
  * @param parentId 16-char lowercase hex parent/span ID
  * @param flags    2-char hex trace flags (default: "01" = sampled)
  */
-export function formatTraceparent(traceId: string, parentId: string, flags = '01'): string {
-	return `00-${traceId}-${parentId}-${flags}`
+export function formatTraceparent(traceId: string, parentId: string, flags = "01"): string {
+	return `00-${traceId}-${parentId}-${flags}`;
 }

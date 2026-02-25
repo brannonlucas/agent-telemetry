@@ -35,6 +35,10 @@ describe("parseTraceparent", () => {
 		expect(parseTraceparent("xx-4bf92f3577b86cd56163f2543210c4a0-00f067aa0ba902b7-01")).toBeNull();
 	});
 
+	it("rejects reserved ff version", () => {
+		expect(parseTraceparent("ff-4bf92f3577b86cd56163f2543210c4a0-00f067aa0ba902b7-01")).toBeNull();
+	});
+
 	it("normalizes uppercase to lowercase", () => {
 		const result = parseTraceparent("00-4BF92F3577B86CD56163F2543210C4A0-00F067AA0BA902B7-01");
 		expect(result).toEqual({

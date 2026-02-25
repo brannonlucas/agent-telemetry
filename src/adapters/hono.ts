@@ -21,6 +21,7 @@
 
 import type { Context, MiddlewareHandler } from "hono";
 import { extractEntities } from "../entities.ts";
+import { toSafeErrorLabel } from "../error.ts";
 import { generateSpanId, generateTraceId } from "../ids.ts";
 import { formatTraceparent, parseTraceparent } from "../traceparent.ts";
 import type { EntityPattern, HttpRequestEvent, Telemetry } from "../types.ts";
@@ -67,7 +68,7 @@ export function createHonoTrace(options: HonoTraceOptions): MiddlewareHandler {
 		try {
 			await next();
 		} catch (err) {
-			error = err instanceof Error ? err.message : "Unknown error";
+			error = toSafeErrorLabel(err);
 			throw err;
 		} finally {
 			const status = error && c.res.status < 400 ? 500 : c.res.status;
@@ -90,7 +91,11 @@ export function createHonoTrace(options: HonoTraceOptions): MiddlewareHandler {
 				if (entities) event.entities = entities;
 			}
 
-			if (error) event.error = error;
+			if (error) {
+				event.error = status >= 500 ? `HTTP ${status}` : error;
+			} else if (status >= 500) {
+				event.error = `HTTP ${status}`;
+			}
 
 			telemetry.emit(event);
 		}

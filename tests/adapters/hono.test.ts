@@ -137,6 +137,7 @@ describe("createHonoTrace", () => {
 		const event = emitted[0] as Record<string, unknown>;
 		expect(event.kind).toBe("http.request");
 		expect(event.status).toBe(500);
+		expect(event.error).toBe("HTTP 500");
 		expect(event.path).toBe("/fail");
 	});
 });

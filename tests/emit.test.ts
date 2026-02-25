@@ -1,11 +1,20 @@
-import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
-import { readFileSync, rmSync } from "node:fs";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { createTelemetry } from "../src/index.ts";
-import type { HttpRequestEvent, PresetEvents } from "../src/types.ts";
+import type { PresetEvents } from "../src/types.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".test-emit-logs");
 const TEST_FILE = "emit-test.jsonl";
+
+async function waitFor(condition: () => boolean, timeoutMs = 1_000): Promise<void> {
+	const start = Date.now();
+	while (Date.now() - start < timeoutMs) {
+		if (condition()) return;
+		await Bun.sleep(5);
+	}
+	throw new Error("Timed out waiting for condition");
+}
 
 beforeEach(() => {
 	rmSync(TEST_DIR, { recursive: true, force: true });
@@ -31,7 +40,9 @@ describe("createTelemetry", () => {
 			duration_ms: 12,
 		});
 
-		const content = readFileSync(join(TEST_DIR, TEST_FILE), "utf-8").trim();
+		const logFile = join(TEST_DIR, TEST_FILE);
+		await waitFor(() => existsSync(logFile));
+		const content = readFileSync(logFile, "utf-8").trim();
 		const event = JSON.parse(content);
 		expect(event.kind).toBe("http.request");
 		expect(event.traceId).toBe("abc123");
@@ -71,21 +82,29 @@ describe("createTelemetry", () => {
 			duration_ms: 5,
 		});
 
-		const content = readFileSync(join(TEST_DIR, TEST_FILE), "utf-8").trim();
+		const logFile = join(TEST_DIR, TEST_FILE);
+		await waitFor(() => existsSync(logFile));
+		const content = readFileSync(logFile, "utf-8").trim();
 		expect(JSON.parse(content).traceId).toBe("def");
 	});
 
 	it("emit never throws even with bad data", async () => {
-		const telemetry = await createTelemetry<PresetEvents>({
+		type LooseEvent = {
+			kind: string;
+			traceId: string;
+			[key: string]: unknown;
+		};
+
+		const telemetry = await createTelemetry<LooseEvent>({
 			logDir: TEST_DIR,
 			filename: TEST_FILE,
 		});
 
 		// Create circular reference to break JSON.stringify
-		const circular: Record<string, unknown> = { kind: "http.request", traceId: "x" };
+		const circular: LooseEvent = { kind: "custom.circular", traceId: "x" };
 		circular.self = circular;
 
-		expect(() => telemetry.emit(circular as unknown as PresetEvents)).not.toThrow();
+		expect(() => telemetry.emit(circular)).not.toThrow();
 	});
 
 	it("supports custom event types", async () => {
@@ -108,7 +127,9 @@ describe("createTelemetry", () => {
 			amount: 4999,
 		});
 
-		const content = readFileSync(join(TEST_DIR, TEST_FILE), "utf-8").trim();
+		const logFile = join(TEST_DIR, TEST_FILE);
+		await waitFor(() => existsSync(logFile));
+		const content = readFileSync(logFile, "utf-8").trim();
 		const event = JSON.parse(content);
 		expect(event.kind).toBe("custom.checkout");
 		expect(event.orderId).toBe("order-abc");
