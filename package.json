@@ -75,7 +75,7 @@
 		}
 	},
 	"devDependencies": {
-		"@biomejs/biome": "^1.9.0",
+		"@biomejs/biome": "^2.0.0",
 		"@types/bun": "latest",
 		"fastify": "^5.7.4",
 		"hono": "^4.7.0",
