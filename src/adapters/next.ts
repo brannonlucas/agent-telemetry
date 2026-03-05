@@ -9,10 +9,11 @@
  */
 
 import { extractEntities } from "../entities.ts";
-import { toSafeErrorLabel } from "../error.ts";
+import { httpOutcome, toSafeErrorLabel } from "../error.ts";
+import { stripQueryAndFragment } from "../fetch-utils.ts";
 import { startSpan, startSpanFromTraceparent } from "../trace-context.ts";
 import { formatTraceparent, parseTraceparent } from "../traceparent.ts";
-import type { EntityPattern, HttpRequestEvent, Telemetry } from "../types.ts";
+import type { EntityPattern, HttpRequestEvent, Telemetry, TraceContextCarrier } from "../types.ts";
 
 // ---------------------------------------------------------------------------
 // Inline Next-like types (no runtime import of next/next/server)
@@ -58,6 +59,8 @@ export interface NextTraceOptions {
 	entityPatterns?: EntityPattern[];
 	/** Guard function -- return false to skip tracing. */
 	isEnabled?: () => boolean;
+	/** Optional path sanitizer. Receives raw path, returns sanitized path. */
+	sanitizePath?: (path: string) => string;
 }
 
 export interface ActionTraceOptions {
@@ -72,15 +75,6 @@ export interface ActionTraceOptions {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function stripQueryAndFragment(url: string): string {
-	const queryIdx = url.indexOf("?");
-	const hashIdx = url.indexOf("#");
-	const cutIdx =
-		queryIdx === -1 ? hashIdx : hashIdx === -1 ? queryIdx : Math.min(queryIdx, hashIdx);
-	const clean = cutIdx === -1 ? url : url.slice(0, cutIdx);
-	return clean || "/";
-}
 
 function resolvePath(request: NextLikeRequest): string {
 	if (request.nextUrl?.pathname) {
@@ -140,9 +134,11 @@ export function createNextMiddleware(options: NextMiddlewareOptions = {}): NextM
 		}
 
 		const incoming = request.headers.get("traceparent");
-		const span = startSpanFromTraceparent(incoming);
+		const incomingTracestate = request.headers.get("tracestate");
+		const span = startSpanFromTraceparent(incoming, incomingTracestate);
 		const headers = cloneHeaders(request.headers);
-		headers.set("traceparent", formatTraceparent(span.traceId, span.spanId, span.traceFlags));
+		headers.set("traceparent", formatTraceparent(span.trace_id, span.span_id, span.trace_flags));
+		if (span.tracestate) headers.set("tracestate", span.tracestate);
 
 		return nextResponse.next({ request: { headers } });
 	};
@@ -159,7 +155,7 @@ export function withNextTrace<TContext>(
 	handler: RouteHandler<TContext>,
 	options: NextTraceOptions,
 ): RouteHandler<TContext> {
-	const { telemetry, entityPatterns, isEnabled } = options;
+	const { telemetry, entityPatterns, isEnabled, sanitizePath } = options;
 
 	return (request, context) => {
 		if (isEnabled && !isEnabled()) {
@@ -168,18 +164,22 @@ export function withNextTrace<TContext>(
 
 		const incoming = request.headers.get("traceparent");
 		const span = startSpanFromTraceparent(incoming);
-		const path = resolvePath(request);
+		const rawPath = resolvePath(request);
+		const path = sanitizePath ? sanitizePath(rawPath) : rawPath;
 		const start = performance.now();
 
-		const emit = (status: number, error?: string) => {
+		const emit = (status_code: number, error_name?: string) => {
 			const event: HttpRequestEvent = {
+				record_type: "event",
+				spec_version: 1,
 				kind: "http.request",
-				traceId: span.traceId,
-				spanId: span.spanId,
-				parentSpanId: span.parentSpanId,
+				trace_id: span.trace_id,
+				span_id: span.span_id,
+				parent_span_id: span.parent_span_id,
+				outcome: httpOutcome(status_code),
 				method: request.method,
 				path,
-				status,
+				status_code,
 				duration_ms: Math.round(performance.now() - start),
 			};
 
@@ -188,8 +188,8 @@ export function withNextTrace<TContext>(
 				if (entities) event.entities = entities;
 			}
 
-			if (error) {
-				event.error = error;
+			if (error_name) {
+				event.error_name = error_name;
 			}
 
 			telemetry.emit(event);
@@ -242,27 +242,33 @@ export function withActionTrace<TArgs extends unknown[], TResult>(
 		try {
 			const result = await action(...args);
 			telemetry.emit({
+				record_type: "event",
+				spec_version: 1,
 				kind: "http.request",
-				traceId: span.traceId,
-				spanId: span.spanId,
-				parentSpanId: span.parentSpanId,
+				trace_id: span.trace_id,
+				span_id: span.span_id,
+				parent_span_id: span.parent_span_id,
+				outcome: "success",
 				method: "ACTION",
 				path: name,
-				status: 200,
+				status_code: 200,
 				duration_ms: Math.round(performance.now() - start),
 			});
 			return result;
 		} catch (err) {
 			telemetry.emit({
+				record_type: "event",
+				spec_version: 1,
 				kind: "http.request",
-				traceId: span.traceId,
-				spanId: span.spanId,
-				parentSpanId: span.parentSpanId,
+				trace_id: span.trace_id,
+				span_id: span.span_id,
+				parent_span_id: span.parent_span_id,
+				outcome: "error",
 				method: "ACTION",
 				path: name,
-				status: 500,
+				status_code: 500,
 				duration_ms: Math.round(performance.now() - start),
-				error: toSafeErrorLabel(err),
+				error_name: toSafeErrorLabel(err),
 			});
 			throw err;
 		}
@@ -273,18 +279,13 @@ export function withActionTrace<TArgs extends unknown[], TResult>(
 // Header-based trace context accessor
 // ---------------------------------------------------------------------------
 
-export function getTraceContext(
-	request: NextLikeRequest,
-):
-	| { _trace: { traceId: string; parentSpanId: string; traceFlags?: string } }
-	| Record<string, never> {
+export function getTraceContext(request: NextLikeRequest): TraceContextCarrier {
 	const parsed = parseTraceparent(request.headers.get("traceparent"));
 	if (!parsed) return {};
-	return {
-		_trace: {
-			traceId: parsed.traceId,
-			parentSpanId: parsed.parentId,
-			traceFlags: parsed.traceFlags,
-		},
+	const trace: { traceparent: string; tracestate?: string } = {
+		traceparent: formatTraceparent(parsed.traceId, parsed.parentId, parsed.traceFlags),
 	};
+	const tracestate = request.headers.get("tracestate");
+	if (tracestate) trace.tracestate = tracestate;
+	return { _trace: trace };
 }

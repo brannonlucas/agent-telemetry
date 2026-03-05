@@ -21,11 +21,11 @@
 
 import type { Context, MiddlewareHandler } from "hono";
 import { extractEntities } from "../entities.ts";
-import { toSafeErrorLabel } from "../error.ts";
+import { httpOutcome, toSafeErrorLabel } from "../error.ts";
 import { generateSpanId } from "../ids.ts";
 import { startSpanFromTraceparent } from "../trace-context.ts";
 import { formatTraceparent } from "../traceparent.ts";
-import type { EntityPattern, HttpRequestEvent, Telemetry } from "../types.ts";
+import type { EntityPattern, HttpRequestEvent, Telemetry, TraceContextCarrier } from "../types.ts";
 
 /** Options for Hono trace middleware. */
 export interface HonoTraceOptions {
@@ -35,12 +35,15 @@ export interface HonoTraceOptions {
 	entityPatterns?: EntityPattern[];
 	/** Guard function — return false to skip tracing for a request. */
 	isEnabled?: () => boolean;
+	/** Optional path sanitizer. Receives raw path, returns sanitized path. */
+	sanitizePath?: (path: string) => string;
 }
 
 /** Hono variable keys for trace storage. */
 const TRACE_ID_VAR = "traceId" as const;
 const SPAN_ID_VAR = "spanId" as const;
 const TRACE_FLAGS_VAR = "traceFlags" as const;
+const TRACESTATE_VAR = "tracestate" as const;
 
 /**
  * Create Hono middleware that traces HTTP requests.
@@ -50,42 +53,48 @@ const TRACE_FLAGS_VAR = "traceFlags" as const;
  * an http.request event on completion.
  */
 export function createHonoTrace(options: HonoTraceOptions): MiddlewareHandler {
-	const { telemetry, entityPatterns, isEnabled } = options;
+	const { telemetry, entityPatterns, isEnabled, sanitizePath } = options;
 
 	return async (c, next) => {
 		if (isEnabled && !isEnabled()) {
 			return next();
 		}
 
-		const span = startSpanFromTraceparent(c.req.header("traceparent"));
+		const span = startSpanFromTraceparent(c.req.header("traceparent"), c.req.header("tracestate"));
 
-		c.set(TRACE_ID_VAR, span.traceId);
-		c.set(SPAN_ID_VAR, span.spanId);
-		c.set(TRACE_FLAGS_VAR, span.traceFlags);
+		c.set(TRACE_ID_VAR, span.trace_id);
+		c.set(SPAN_ID_VAR, span.span_id);
+		c.set(TRACE_FLAGS_VAR, span.trace_flags);
+		if (span.tracestate) c.set(TRACESTATE_VAR, span.tracestate);
 
 		const start = performance.now();
-		let error: string | undefined;
+		let error_name: string | undefined;
 
 		try {
 			await next();
 		} catch (err) {
-			error = toSafeErrorLabel(err);
+			error_name = toSafeErrorLabel(err);
 			throw err;
 		} finally {
-			const status = error && c.res.status < 400 ? 500 : c.res.status;
+			const status_code = error_name && c.res.status < 400 ? 500 : c.res.status;
 			const duration_ms = Math.round(performance.now() - start);
-			const path = c.req.path;
+			const rawPath = c.req.path;
+			const path = sanitizePath ? sanitizePath(rawPath) : rawPath;
 
-			c.header("traceparent", formatTraceparent(span.traceId, span.spanId, span.traceFlags));
+			c.header("traceparent", formatTraceparent(span.trace_id, span.span_id, span.trace_flags));
+			if (span.tracestate) c.header("tracestate", span.tracestate);
 
 			const event: HttpRequestEvent = {
+				record_type: "event",
+				spec_version: 1,
 				kind: "http.request",
-				traceId: span.traceId,
-				spanId: span.spanId,
-				parentSpanId: span.parentSpanId,
+				trace_id: span.trace_id,
+				span_id: span.span_id,
+				parent_span_id: span.parent_span_id,
+				outcome: httpOutcome(status_code),
 				method: c.req.method,
 				path,
-				status,
+				status_code,
 				duration_ms,
 			};
 
@@ -94,10 +103,10 @@ export function createHonoTrace(options: HonoTraceOptions): MiddlewareHandler {
 				if (entities) event.entities = entities;
 			}
 
-			if (error) {
-				event.error = status >= 500 ? `HTTP ${status}` : error;
-			} else if (status >= 500) {
-				event.error = `HTTP ${status}`;
+			if (error_name) {
+				event.error_name = status_code >= 500 ? error_name : undefined;
+			} else if (status_code >= 500) {
+				event.error_name = `HTTP ${status_code}`;
 			}
 
 			telemetry.emit(event);
@@ -118,14 +127,17 @@ export function createHonoTrace(options: HonoTraceOptions): MiddlewareHandler {
  * })
  * ```
  */
-export function getTraceContext(
-	c: Context,
-):
-	| { _trace: { traceId: string; parentSpanId: string; traceFlags?: string } }
-	| Record<string, never> {
+export function getTraceContext(c: Context): TraceContextCarrier {
 	const traceId = c.get(TRACE_ID_VAR) as string | undefined;
 	const spanId = c.get(SPAN_ID_VAR) as string | undefined;
 	const traceFlags = c.get(TRACE_FLAGS_VAR) as string | undefined;
+	const tracestate = c.get(TRACESTATE_VAR) as string | undefined;
 	if (!traceId) return {};
-	return { _trace: { traceId, parentSpanId: spanId ?? generateSpanId(), traceFlags } };
+	const carrier: TraceContextCarrier = {
+		_trace: { traceparent: formatTraceparent(traceId, spanId ?? generateSpanId(), traceFlags) },
+	};
+	if (tracestate)
+		(carrier as { _trace: { traceparent: string; tracestate?: string } })._trace.tracestate =
+			tracestate;
+	return carrier;
 }

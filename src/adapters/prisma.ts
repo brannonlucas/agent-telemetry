@@ -19,7 +19,7 @@
 
 import { toSafeErrorLabel } from "../error.ts";
 import { startSpan } from "../trace-context.ts";
-import type { DbQueryEvent, Telemetry, TraceContext } from "../types.ts";
+import type { DbQueryEvent, LegacyTraceContext, Telemetry } from "../types.ts";
 
 /** Options for the Prisma trace extension. */
 export interface PrismaTraceOptions {
@@ -28,7 +28,7 @@ export interface PrismaTraceOptions {
 	/** Guard function — return false to skip tracing. */
 	isEnabled?: () => boolean;
 	/** Provide parent trace context for correlating with an incoming request. */
-	getTraceContext?: () => TraceContext | undefined;
+	getTraceContext?: () => LegacyTraceContext | undefined;
 }
 
 /** Callback params passed by Prisma's $allOperations hook. */
@@ -53,7 +53,7 @@ export interface PrismaTraceExtension {
  *
  * Returns a plain object compatible with `PrismaClient.$extends()`.
  * Emits a db.query event for every model operation with timing,
- * status, and optional trace context correlation.
+ * outcome, and optional trace context correlation.
  */
 export function createPrismaTrace(options: PrismaTraceOptions): PrismaTraceExtension {
 	const { telemetry, isEnabled, getTraceContext } = options;
@@ -69,9 +69,9 @@ export function createPrismaTrace(options: PrismaTraceOptions): PrismaTraceExten
 					const start = performance.now();
 					const ctx = getTraceContext?.();
 					const span = startSpan({
-						traceId: ctx?.traceId,
-						parentSpanId: ctx?.parentSpanId,
-						traceFlags: ctx?.traceFlags,
+						trace_id: ctx?.trace_id,
+						parent_span_id: ctx?.parent_span_id,
+						trace_flags: ctx?.trace_flags,
 					});
 
 					try {
@@ -79,15 +79,17 @@ export function createPrismaTrace(options: PrismaTraceOptions): PrismaTraceExten
 						const duration_ms = Math.round(performance.now() - start);
 
 						const event: DbQueryEvent = {
+							record_type: "event",
+							spec_version: 1,
 							kind: "db.query",
-							traceId: span.traceId,
-							spanId: span.spanId,
-							parentSpanId: span.parentSpanId,
+							trace_id: span.trace_id,
+							span_id: span.span_id,
+							parent_span_id: span.parent_span_id,
 							provider: "prisma",
 							model,
 							operation,
 							duration_ms,
-							status: "success",
+							outcome: "success",
 						};
 						telemetry.emit(event);
 
@@ -96,16 +98,18 @@ export function createPrismaTrace(options: PrismaTraceOptions): PrismaTraceExten
 						const duration_ms = Math.round(performance.now() - start);
 
 						const event: DbQueryEvent = {
+							record_type: "event",
+							spec_version: 1,
 							kind: "db.query",
-							traceId: span.traceId,
-							spanId: span.spanId,
-							parentSpanId: span.parentSpanId,
+							trace_id: span.trace_id,
+							span_id: span.span_id,
+							parent_span_id: span.parent_span_id,
 							provider: "prisma",
 							model,
 							operation,
 							duration_ms,
-							status: "error",
-							error: toSafeErrorLabel(err),
+							outcome: "error",
+							error_name: toSafeErrorLabel(err),
 						};
 						telemetry.emit(event);
 

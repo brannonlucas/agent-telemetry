@@ -2,7 +2,7 @@
  * Express Adapter
  *
  * Creates Express middleware that traces HTTP requests. Emits http.request
- * telemetry events with method, path, status, duration, and extracted entities.
+ * telemetry events with method, path, status_code, duration, and extracted entities.
  *
  * No runtime import of express — uses inline types for req/res/next.
  *
@@ -17,9 +17,11 @@
  */
 
 import { extractEntities } from "../entities.ts";
+import { httpOutcome } from "../error.ts";
+import { stripQueryAndFragment } from "../fetch-utils.ts";
 import { startSpanFromTraceparent } from "../trace-context.ts";
 import { formatTraceparent } from "../traceparent.ts";
-import type { EntityPattern, HttpRequestEvent, Telemetry } from "../types.ts";
+import type { EntityPattern, HttpRequestEvent, Telemetry, TraceContextCarrier } from "../types.ts";
 
 // ============================================================================
 // Inline Express Types (no runtime import of express)
@@ -52,16 +54,10 @@ export type ExpressMiddleware = (
 // Request-Scoped Trace Storage
 // ============================================================================
 
-const traceStore = new WeakMap<object, { traceId: string; spanId: string; traceFlags: string }>();
-
-function stripQueryAndFragment(url: string): string {
-	const queryIdx = url.indexOf("?");
-	const hashIdx = url.indexOf("#");
-	const cutIdx =
-		queryIdx === -1 ? hashIdx : hashIdx === -1 ? queryIdx : Math.min(queryIdx, hashIdx);
-	const clean = cutIdx === -1 ? url : url.slice(0, cutIdx);
-	return clean || "/";
-}
+const traceStore = new WeakMap<
+	object,
+	{ trace_id: string; span_id: string; trace_flags: string; tracestate?: string }
+>();
 
 // ============================================================================
 // Options
@@ -75,6 +71,8 @@ export interface ExpressTraceOptions {
 	entityPatterns?: EntityPattern[];
 	/** Guard function — return false to skip tracing for a request. */
 	isEnabled?: () => boolean;
+	/** Optional path sanitizer. Receives raw path, returns sanitized path. */
+	sanitizePath?: (path: string) => string;
 }
 
 // ============================================================================
@@ -84,7 +82,7 @@ export interface ExpressTraceOptions {
 /**
  * Create Express middleware that traces HTTP requests.
  *
- * Generates a traceId per request (or propagates a valid incoming
+ * Generates a trace_id per request (or propagates a valid incoming
  * `traceparent`), stores it on a WeakMap keyed by the request object,
  * sets the `traceparent` response header, and emits an http.request
  * event on completion.
@@ -93,7 +91,7 @@ export interface ExpressTraceOptions {
  * emit-once guard to handle aborted requests without double-emission.
  */
 export function createExpressTrace(options: ExpressTraceOptions): ExpressMiddleware {
-	const { telemetry, entityPatterns, isEnabled } = options;
+	const { telemetry, entityPatterns, isEnabled, sanitizePath } = options;
 
 	return (req, res, next) => {
 		if (isEnabled && !isEnabled()) {
@@ -104,14 +102,17 @@ export function createExpressTrace(options: ExpressTraceOptions): ExpressMiddlew
 		const incoming = Array.isArray(req.headers.traceparent)
 			? req.headers.traceparent[0]
 			: req.headers.traceparent;
-		const span = startSpanFromTraceparent(incoming);
+		const incomingTracestate = Array.isArray(req.headers.tracestate)
+			? req.headers.tracestate[0]
+			: req.headers.tracestate;
+		const span = startSpanFromTraceparent(incoming, incomingTracestate);
 
 		traceStore.set(req, {
-			traceId: span.traceId,
-			spanId: span.spanId,
-			traceFlags: span.traceFlags,
+			trace_id: span.trace_id,
+			span_id: span.span_id,
+			trace_flags: span.trace_flags,
+			tracestate: span.tracestate,
 		});
-		res.setHeader("traceparent", formatTraceparent(span.traceId, span.spanId, span.traceFlags));
 
 		const start = performance.now();
 		let emitted = false;
@@ -121,17 +122,29 @@ export function createExpressTrace(options: ExpressTraceOptions): ExpressMiddlew
 			emitted = true;
 
 			const duration_ms = Math.round(performance.now() - start);
-			const requestPath = stripQueryAndFragment(req.originalUrl || req.url || "/");
-			const path = req.route?.path ?? requestPath;
+			const rawPath = stripQueryAndFragment(req.originalUrl || req.url || "/");
+			const requestPath = sanitizePath ? sanitizePath(rawPath) : rawPath;
+			const route = req.route?.path;
+
+			// Set traceparent in cleanup (spec §5.2: after handler execution)
+			res.setHeader(
+				"traceparent",
+				formatTraceparent(span.trace_id, span.span_id, span.trace_flags),
+			);
+			if (span.tracestate) res.setHeader("tracestate", span.tracestate);
 
 			const event: HttpRequestEvent = {
+				record_type: "event",
+				spec_version: 1,
 				kind: "http.request",
-				traceId: span.traceId,
-				spanId: span.spanId,
-				parentSpanId: span.parentSpanId,
+				trace_id: span.trace_id,
+				span_id: span.span_id,
+				parent_span_id: span.parent_span_id,
+				outcome: httpOutcome(res.statusCode),
 				method: req.method,
-				path,
-				status: res.statusCode,
+				path: requestPath,
+				route,
+				status_code: res.statusCode,
 				duration_ms,
 			};
 
@@ -141,7 +154,7 @@ export function createExpressTrace(options: ExpressTraceOptions): ExpressMiddlew
 			}
 
 			if (res.statusCode >= 500) {
-				event.error = `HTTP ${res.statusCode}`;
+				event.error_name = `HTTP ${res.statusCode}`;
 			}
 
 			telemetry.emit(event);
@@ -171,18 +184,12 @@ export function createExpressTrace(options: ExpressTraceOptions): ExpressMiddlew
  * })
  * ```
  */
-export function getTraceContext(
-	req: object,
-):
-	| { _trace: { traceId: string; parentSpanId: string; traceFlags?: string } }
-	| Record<string, never> {
+export function getTraceContext(req: object): TraceContextCarrier {
 	const stored = traceStore.get(req);
 	if (!stored) return {};
-	return {
-		_trace: {
-			traceId: stored.traceId,
-			parentSpanId: stored.spanId,
-			traceFlags: stored.traceFlags,
-		},
+	const trace: { traceparent: string; tracestate?: string } = {
+		traceparent: formatTraceparent(stored.trace_id, stored.span_id, stored.trace_flags),
 	};
+	if (stored.tracestate) trace.tracestate = stored.tracestate;
+	return { _trace: trace };
 }

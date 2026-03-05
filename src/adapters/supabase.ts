@@ -23,15 +23,15 @@
  * ```
  */
 
-import { toSafeErrorLabel } from "../error.ts";
-import { type FetchFn, resolveInput } from "../fetch-utils.ts";
+import { httpOutcome, toSafeErrorLabel } from "../error.ts";
+import { type FetchFn, resolveInput, resolveUrl } from "../fetch-utils.ts";
 import { startSpan } from "../trace-context.ts";
 import type {
 	DbQueryEvent,
 	ExternalCallEvent,
+	LegacyTraceContext,
 	SupabaseEvents,
 	Telemetry,
-	TraceContext,
 } from "../types.ts";
 
 export type { FetchFn } from "../fetch-utils.ts";
@@ -43,7 +43,7 @@ export interface SupabaseTraceOptions {
 	/** Base fetch implementation. Default: globalThis.fetch. */
 	baseFetch?: FetchFn;
 	/** Provide trace context for correlating with a parent HTTP request. */
-	getTraceContext?: () => TraceContext | undefined;
+	getTraceContext?: () => LegacyTraceContext | undefined;
 	/** Guard function — return false to skip tracing. */
 	isEnabled?: () => boolean;
 }
@@ -67,7 +67,7 @@ const METHOD_TO_OPERATION: Record<string, string> = {
 	DELETE: "delete",
 };
 
-// URL pattern regexes — use /v\d+/ to handle future API versions (I5).
+// URL pattern regexes
 const REST_RE = /\/rest\/v\d+\/([^?/]+)/;
 const AUTH_RE = /\/auth\/v\d+\/(.+)/;
 const STORAGE_RE = /\/storage\/v\d+\/object\/([^/]+)/;
@@ -75,36 +75,22 @@ const FUNCTIONS_RE = /\/functions\/v\d+\/([^?/]+)/;
 
 /**
  * Classify a Supabase request URL into the appropriate event type.
- * Uses the URL pathname to determine if it's a PostgREST, Auth,
- * Storage, Functions, or fallback request.
  */
 function classifyRequest(url: URL, method: string): Classification {
 	const pathname = url.pathname;
 
-	// PostgREST: /rest/v{N}/{table}
 	const restMatch = REST_RE.exec(pathname);
 	if (restMatch) {
 		const table = restMatch[1] as string;
 		const operation = METHOD_TO_OPERATION[method] ?? method.toLowerCase();
-		return {
-			kind: "db.query",
-			provider: "supabase",
-			model: table,
-			operation,
-		};
+		return { kind: "db.query", provider: "supabase", model: table, operation };
 	}
 
-	// Auth: /auth/v{N}/{endpoint}
 	const authMatch = AUTH_RE.exec(pathname);
 	if (authMatch) {
-		return {
-			kind: "external.call",
-			service: "supabase-auth",
-			operation: authMatch[1] as string,
-		};
+		return { kind: "external.call", service: "supabase-auth", operation: authMatch[1] as string };
 	}
 
-	// Storage: /storage/v{N}/object/{bucket}/...
 	const storageMatch = STORAGE_RE.exec(pathname);
 	if (storageMatch) {
 		return {
@@ -114,7 +100,6 @@ function classifyRequest(url: URL, method: string): Classification {
 		};
 	}
 
-	// Functions: /functions/v{N}/{name}
 	const functionsMatch = FUNCTIONS_RE.exec(pathname);
 	if (functionsMatch) {
 		return {
@@ -124,20 +109,11 @@ function classifyRequest(url: URL, method: string): Classification {
 		};
 	}
 
-	// Fallback: unknown path
-	return {
-		kind: "external.call",
-		service: "supabase",
-		operation: `${method} ${pathname}`,
-	};
+	return { kind: "external.call", service: "supabase", operation: `${method} ${pathname}` };
 }
 
 /**
  * Create a traced fetch function for Supabase that emits telemetry events.
- *
- * The returned function has the same signature as globalThis.fetch.
- * The original input and init are passed through to baseFetch untouched.
- * The Response object is returned as-is — streaming bodies work correctly.
  */
 export function createSupabaseTrace(options: SupabaseTraceOptions): FetchFn {
 	const { telemetry, baseFetch = globalThis.fetch, getTraceContext, isEnabled } = options;
@@ -147,56 +123,56 @@ export function createSupabaseTrace(options: SupabaseTraceOptions): FetchFn {
 			return baseFetch(input, init);
 		}
 
-		// Extract metadata only — original input is never modified.
 		const { url, method: resolvedMethod } = resolveInput(input);
 		const method = init?.method?.toUpperCase() ?? resolvedMethod.toUpperCase();
 
-		let parsed: URL;
-		try {
-			parsed = new URL(url);
-		} catch {
-			parsed = new URL(url, "http://localhost");
-		}
+		const parsed = resolveUrl(url);
 
 		const classification = classifyRequest(parsed, method);
 
 		const ctx = getTraceContext?.();
 		const span = startSpan({
-			traceId: ctx?.traceId,
-			parentSpanId: ctx?.parentSpanId,
-			traceFlags: ctx?.traceFlags,
+			trace_id: ctx?.trace_id,
+			parent_span_id: ctx?.parent_span_id,
+			trace_flags: ctx?.trace_flags,
 		});
 
 		const start = performance.now();
 
 		try {
-			// Pass ORIGINAL input/init to baseFetch unchanged.
 			const response = await baseFetch(input, init);
 			const duration_ms = Math.round(performance.now() - start);
 
 			if (classification.kind === "db.query") {
+				// PostgREST HTTP errors ARE query failures (constraint violations, missing tables, etc.)
 				const event: DbQueryEvent = {
+					record_type: "event",
+					spec_version: 1,
 					kind: "db.query",
-					traceId: span.traceId,
-					spanId: span.spanId,
-					parentSpanId: span.parentSpanId,
+					trace_id: span.trace_id,
+					span_id: span.span_id,
+					parent_span_id: span.parent_span_id,
 					provider: classification.provider,
 					model: classification.model,
 					operation: classification.operation,
 					duration_ms,
-					status: "success",
+					outcome: response.ok ? "success" : "error",
 				};
 				telemetry.emit(event);
 			} else {
+				// Auth/Storage/Functions: use httpOutcome (5xx = error)
 				const event: ExternalCallEvent = {
+					record_type: "event",
+					spec_version: 1,
 					kind: "external.call",
-					traceId: span.traceId,
-					spanId: span.spanId,
-					parentSpanId: span.parentSpanId,
+					trace_id: span.trace_id,
+					span_id: span.span_id,
+					parent_span_id: span.parent_span_id,
 					service: classification.service,
 					operation: classification.operation,
 					duration_ms,
-					status: "success",
+					outcome: httpOutcome(response.status),
+					status_code: response.status,
 				};
 				telemetry.emit(event);
 			}
@@ -207,28 +183,33 @@ export function createSupabaseTrace(options: SupabaseTraceOptions): FetchFn {
 
 			if (classification.kind === "db.query") {
 				const event: DbQueryEvent = {
+					record_type: "event",
+					spec_version: 1,
 					kind: "db.query",
-					traceId: span.traceId,
-					spanId: span.spanId,
-					parentSpanId: span.parentSpanId,
+					trace_id: span.trace_id,
+					span_id: span.span_id,
+					parent_span_id: span.parent_span_id,
 					provider: classification.provider,
 					model: classification.model,
 					operation: classification.operation,
 					duration_ms,
-					status: "error",
-					error: toSafeErrorLabel(err),
+					outcome: "error",
+					error_name: toSafeErrorLabel(err),
 				};
 				telemetry.emit(event);
 			} else {
 				const event: ExternalCallEvent = {
+					record_type: "event",
+					spec_version: 1,
 					kind: "external.call",
-					traceId: span.traceId,
-					spanId: span.spanId,
-					parentSpanId: span.parentSpanId,
+					trace_id: span.trace_id,
+					span_id: span.span_id,
+					parent_span_id: span.parent_span_id,
 					service: classification.service,
 					operation: classification.operation,
 					duration_ms,
-					status: "error",
+					outcome: "error",
+					error_name: toSafeErrorLabel(err),
 				};
 				telemetry.emit(event);
 			}

@@ -18,9 +18,11 @@
  */
 
 import { extractEntities } from "../entities.ts";
+import { httpOutcome } from "../error.ts";
+import { stripQueryAndFragment } from "../fetch-utils.ts";
 import { startSpanFromTraceparent } from "../trace-context.ts";
 import { formatTraceparent } from "../traceparent.ts";
-import type { EntityPattern, HttpRequestEvent, Telemetry } from "../types.ts";
+import type { EntityPattern, HttpRequestEvent, Telemetry, TraceContextCarrier } from "../types.ts";
 
 // ---------------------------------------------------------------------------
 // Inline Fastify types (no runtime import)
@@ -64,17 +66,14 @@ type FastifyPluginCallback = ((
 
 const traceStore = new WeakMap<
 	object,
-	{ traceId: string; spanId: string; parentSpanId?: string; traceFlags: string }
+	{
+		trace_id: string;
+		span_id: string;
+		parent_span_id?: string;
+		trace_flags: string;
+		tracestate?: string;
+	}
 >();
-
-function stripQueryAndFragment(url: string): string {
-	const queryIdx = url.indexOf("?");
-	const hashIdx = url.indexOf("#");
-	const cutIdx =
-		queryIdx === -1 ? hashIdx : hashIdx === -1 ? queryIdx : Math.min(queryIdx, hashIdx);
-	const clean = cutIdx === -1 ? url : url.slice(0, cutIdx);
-	return clean || "/";
-}
 
 // ---------------------------------------------------------------------------
 // Options
@@ -88,6 +87,8 @@ export interface FastifyTraceOptions {
 	entityPatterns?: EntityPattern[];
 	/** Guard function -- return false to skip tracing for a request. */
 	isEnabled?: () => boolean;
+	/** Optional path sanitizer. Receives raw path, returns sanitized path. */
+	sanitizePath?: (path: string) => string;
 }
 
 // ---------------------------------------------------------------------------
@@ -98,13 +99,13 @@ export interface FastifyTraceOptions {
  * Create a Fastify plugin that traces HTTP requests.
  *
  * Registers onRequest and onResponse hooks. The onRequest hook generates
- * a traceId (or propagates a valid incoming `traceparent`), stores it in
+ * a trace_id (or propagates a valid incoming `traceparent`), stores it in
  * a WeakMap keyed on the Fastify request object, and sets the response
  * `traceparent` header. The onResponse hook emits an http.request event
  * using `reply.elapsedTime` for high-resolution duration.
  */
 export function createFastifyTrace(options: FastifyTraceOptions): FastifyPluginCallback {
-	const { telemetry, entityPatterns, isEnabled } = options;
+	const { telemetry, entityPatterns, isEnabled, sanitizePath } = options;
 
 	const plugin = (instance: FastifyInstance, _opts: Record<string, unknown>, done: () => void) => {
 		instance.addHook("onRequest", (request, reply, hookDone) => {
@@ -116,15 +117,20 @@ export function createFastifyTrace(options: FastifyTraceOptions): FastifyPluginC
 			const incoming = Array.isArray(request.headers.traceparent)
 				? request.headers.traceparent[0]
 				: request.headers.traceparent;
-			const span = startSpanFromTraceparent(incoming);
+			const incomingTracestate = Array.isArray(request.headers.tracestate)
+				? request.headers.tracestate[0]
+				: request.headers.tracestate;
+			const span = startSpanFromTraceparent(incoming, incomingTracestate);
 
 			traceStore.set(request, {
-				traceId: span.traceId,
-				spanId: span.spanId,
-				parentSpanId: span.parentSpanId,
-				traceFlags: span.traceFlags,
+				trace_id: span.trace_id,
+				span_id: span.span_id,
+				parent_span_id: span.parent_span_id,
+				trace_flags: span.trace_flags,
+				tracestate: span.tracestate,
 			});
-			reply.header("traceparent", formatTraceparent(span.traceId, span.spanId, span.traceFlags));
+			reply.header("traceparent", formatTraceparent(span.trace_id, span.span_id, span.trace_flags));
+			if (span.tracestate) reply.header("tracestate", span.tracestate);
 			hookDone();
 		});
 
@@ -135,24 +141,27 @@ export function createFastifyTrace(options: FastifyTraceOptions): FastifyPluginC
 				return;
 			}
 
-			const requestPath = stripQueryAndFragment(request.url);
-			const path = request.routeOptions?.url ?? requestPath;
+			const rawPath = stripQueryAndFragment(request.url);
+			const requestPath = sanitizePath ? sanitizePath(rawPath) : rawPath;
+			const route = request.routeOptions?.url;
 			const duration_ms = Math.round(reply.elapsedTime);
 
 			const event: HttpRequestEvent = {
+				record_type: "event",
+				spec_version: 1,
 				kind: "http.request",
-				traceId: trace.traceId,
-				spanId: trace.spanId,
-				parentSpanId: trace.parentSpanId,
+				trace_id: trace.trace_id,
+				span_id: trace.span_id,
+				parent_span_id: trace.parent_span_id,
+				outcome: httpOutcome(reply.statusCode),
 				method: request.method,
-				path,
-				status: reply.statusCode,
+				path: requestPath,
+				route,
+				status_code: reply.statusCode,
 				duration_ms,
 			};
 
 			if (entityPatterns) {
-				// Extract entities from the actual URL (with real IDs),
-				// not the parameterized route pattern
 				const entities = extractEntities(requestPath, entityPatterns);
 				if (entities) event.entities = entities;
 			}
@@ -189,19 +198,13 @@ export function createFastifyTrace(options: FastifyTraceOptions): FastifyPluginC
  * })
  * ```
  */
-export function getTraceContext(
-	request: unknown,
-):
-	| { _trace: { traceId: string; parentSpanId: string; traceFlags?: string } }
-	| Record<string, never> {
+export function getTraceContext(request: unknown): TraceContextCarrier {
 	if (!request || typeof request !== "object") return {};
 	const trace = traceStore.get(request);
 	if (!trace) return {};
-	return {
-		_trace: {
-			traceId: trace.traceId,
-			parentSpanId: trace.spanId,
-			traceFlags: trace.traceFlags,
-		},
+	const carrier: { traceparent: string; tracestate?: string } = {
+		traceparent: formatTraceparent(trace.trace_id, trace.span_id, trace.trace_flags),
 	};
+	if (trace.tracestate) carrier.tracestate = trace.tracestate;
+	return { _trace: carrier };
 }

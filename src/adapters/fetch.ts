@@ -19,6 +19,7 @@
  * ```
  */
 
+import { httpOutcome } from "../error.ts";
 import {
 	type FetchFn,
 	defaultPropagateTo,
@@ -28,7 +29,7 @@ import {
 } from "../fetch-utils.ts";
 import { startSpan } from "../trace-context.ts";
 import { formatTraceparent } from "../traceparent.ts";
-import type { ExternalCallEvent, Telemetry, TraceContext } from "../types.ts";
+import type { ExternalCallEvent, LegacyTraceContext, Telemetry } from "../types.ts";
 
 export type { FetchFn } from "../fetch-utils.ts";
 
@@ -39,7 +40,7 @@ export interface TracedFetchOptions {
 	/** Base fetch implementation. Default: globalThis.fetch. */
 	baseFetch?: FetchFn;
 	/** Provide trace context for correlating with a parent HTTP request. */
-	getTraceContext?: () => TraceContext | undefined;
+	getTraceContext?: () => LegacyTraceContext | undefined;
 	/** Predicate controlling where to forward `traceparent` headers. */
 	propagateTo?: (url: URL) => boolean;
 	/** Optional callback invoked when responses include `traceparent`. */
@@ -54,7 +55,7 @@ export interface TracedFetchOptions {
  * The returned function has the same signature as globalThis.fetch.
  * Request inputs are only cloned when header propagation is enabled.
  * Non-2xx responses are returned normally (not thrown). Network errors
- * are emitted as status "error" and re-thrown.
+ * are emitted as outcome "error" and re-thrown.
  */
 export function createTracedFetch(options: TracedFetchOptions): FetchFn {
 	const {
@@ -82,11 +83,11 @@ export function createTracedFetch(options: TracedFetchOptions): FetchFn {
 
 		const ctx = getTraceContext?.();
 		const span = startSpan({
-			traceId: ctx?.traceId,
-			parentSpanId: ctx?.parentSpanId,
-			traceFlags: ctx?.traceFlags,
+			trace_id: ctx?.trace_id,
+			parent_span_id: ctx?.parent_span_id,
+			trace_flags: ctx?.trace_flags,
 		});
-		const traceparent = formatTraceparent(span.traceId, span.spanId, span.traceFlags);
+		const traceparent = formatTraceparent(span.trace_id, span.span_id, span.trace_flags);
 
 		const shouldPropagate = (propagateTo ?? defaultPropagateTo)(parsedUrl);
 		const outbound = shouldPropagate
@@ -103,30 +104,37 @@ export function createTracedFetch(options: TracedFetchOptions): FetchFn {
 				onResponseTraceparent?.(responseTraceparent);
 			}
 
+			// Spec §7.8: 5xx = outcome "error", everything else = "success".
 			telemetry.emit({
+				record_type: "event",
+				spec_version: 1,
 				kind: "external.call",
-				traceId: span.traceId,
-				spanId: span.spanId,
-				parentSpanId: span.parentSpanId,
+				trace_id: span.trace_id,
+				span_id: span.span_id,
+				parent_span_id: span.parent_span_id,
 				service,
 				operation,
 				duration_ms,
-				status: "success",
+				outcome: httpOutcome(response.status),
+				status_code: response.status,
 			});
 
 			return response;
 		} catch (err) {
 			const duration_ms = Math.round(performance.now() - start);
 
+			// Spec §7.8: network-level failure = outcome "error".
 			telemetry.emit({
+				record_type: "event",
+				spec_version: 1,
 				kind: "external.call",
-				traceId: span.traceId,
-				spanId: span.spanId,
-				parentSpanId: span.parentSpanId,
+				trace_id: span.trace_id,
+				span_id: span.span_id,
+				parent_span_id: span.parent_span_id,
 				service,
 				operation,
 				duration_ms,
-				status: "error",
+				outcome: "error",
 			});
 
 			throw err;

@@ -20,6 +20,7 @@ import { InngestMiddleware } from "inngest";
 import { extractEntitiesFromEvent } from "../entities.ts";
 import { toSafeErrorLabel } from "../error.ts";
 import { generateSpanId, generateTraceId } from "../ids.ts";
+import { formatTraceparent, parseTraceparent } from "../traceparent.ts";
 import type {
 	JobDispatchEvent,
 	JobEndEvent,
@@ -39,6 +40,30 @@ export interface InngestTraceOptions {
 }
 
 /**
+ * Parse trace context from the _trace envelope.
+ * Only accepts the traceparent string format. Legacy decomposed format
+ * ({ trace_id, parent_span_id }) is ignored as of 0.7.0.
+ */
+function parseTraceEnvelope(rawTrace: Record<string, unknown> | undefined): {
+	trace_id: string;
+	parent_span_id?: string;
+} {
+	if (!rawTrace) {
+		return { trace_id: generateTraceId() };
+	}
+
+	// New format: { traceparent: "00-{trace_id}-{parent_id}-{flags}" }
+	if (typeof rawTrace.traceparent === "string") {
+		const parsed = parseTraceparent(rawTrace.traceparent);
+		if (parsed) {
+			return { trace_id: parsed.traceId, parent_span_id: parsed.parentId };
+		}
+	}
+
+	return { trace_id: generateTraceId() };
+}
+
+/**
  * Create Inngest middleware that traces function runs and event dispatches.
  *
  * Hooks:
@@ -54,40 +79,46 @@ export function createInngestTrace(options: InngestTraceOptions): InngestMiddlew
 			return {
 				onFunctionRun({ ctx, fn }) {
 					const eventData = (ctx.event.data ?? {}) as Record<string, unknown>;
-					const trace = eventData._trace as { traceId: string; parentSpanId: string } | undefined;
+					const rawTrace = eventData._trace as Record<string, unknown> | undefined;
+					const { trace_id, parent_span_id } = parseTraceEnvelope(rawTrace);
 
-					const traceId = trace?.traceId ?? generateTraceId();
-					const spanId = generateSpanId();
-					const runId = ctx.runId;
-					const functionId = fn.id("");
+					const span_id = generateSpanId();
+					const task_id = ctx.runId;
+					const task_name = fn.id("");
 					const entities =
 						entityKeys.length > 0 ? extractEntitiesFromEvent(eventData, entityKeys) : undefined;
-					const start = Date.now();
+					const start = performance.now();
 
 					const startEvent: JobStartEvent = {
+						record_type: "event",
+						spec_version: 1,
 						kind: "job.start",
-						traceId,
-						spanId,
-						functionId,
-						runId,
+						trace_id,
+						span_id,
+						parent_span_id,
+						task_name,
+						task_id,
 						entities,
 					};
 					telemetry.emit(startEvent);
 
 					return {
 						finished({ result }) {
-							const duration_ms = Date.now() - start;
+							const duration_ms = Math.round(performance.now() - start);
 							const hasError = result.error != null;
 
 							const endEvent: JobEndEvent = {
+								record_type: "event",
+								spec_version: 1,
 								kind: "job.end",
-								traceId,
-								spanId,
-								functionId,
-								runId,
+								trace_id,
+								span_id,
+								parent_span_id,
+								task_name,
+								task_id,
 								duration_ms,
-								status: hasError ? "error" : "success",
-								error: hasError ? toSafeErrorLabel(result.error) : undefined,
+								outcome: hasError ? "error" : "success",
+								error_name: hasError ? toSafeErrorLabel(result.error) : undefined,
 							};
 							telemetry.emit(endEvent);
 						},
@@ -102,20 +133,33 @@ export function createInngestTrace(options: InngestTraceOptions): InngestMiddlew
 									string,
 									unknown
 								>;
-								const trace = data._trace as { traceId: string; parentSpanId: string } | undefined;
+								const rawTrace = data._trace as Record<string, unknown> | undefined;
+								const { trace_id, parent_span_id } = parseTraceEnvelope(rawTrace);
 
-								if (trace) {
+								if (rawTrace) {
+									// Generate a unique span_id for this dispatch (spec §7.9).
+									const dispatch_span_id = generateSpanId();
+
 									const dispatchEvent: JobDispatchEvent = {
+										record_type: "event",
+										spec_version: 1,
 										kind: "job.dispatch",
-										traceId: trace.traceId,
-										parentSpanId: trace.parentSpanId,
-										eventName: (payload as { name: string }).name,
+										trace_id,
+										span_id: dispatch_span_id,
+										parent_span_id: parent_span_id ?? dispatch_span_id,
+										task_name: (payload as { name: string }).name,
+										outcome: "success",
 										entities:
 											entityKeys.length > 0
 												? extractEntitiesFromEvent(data, entityKeys)
 												: undefined,
 									};
 									telemetry.emit(dispatchEvent);
+
+									// Update _trace with new traceparent format for downstream receiver
+									(data as Record<string, unknown>)._trace = {
+										traceparent: formatTraceparent(trace_id, dispatch_span_id, "01"),
+									};
 								}
 							}
 						},
