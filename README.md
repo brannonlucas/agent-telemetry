@@ -252,29 +252,113 @@ const res = await fetch('https://api.stripe.com/v1/charges', { method: 'POST' })
 
 ## Browser Trace Context
 
-Use the browser helpers to continue the same trace from UI requests into server adapters.
+The browser module connects client-side user actions to server-side traces through a three-step flow:
+
+1. **Server renders a meta tag** with the current `traceparent` during SSR/page render
+2. **Browser bootstraps** from that meta tag, inheriting the same trace
+3. **Traced fetch** injects `traceparent` on outgoing requests, closing the loop
+
+### Step 1: Server-Side -- Inject the Meta Tag
+
+Your page handler renders a `<meta>` tag containing the current trace context. This bridges the server render and client-side JavaScript.
 
 ```typescript
-import { createBrowserTraceContext, createBrowserTracedFetch } from 'agent-telemetry/browser'
+// server.ts (Hono example -- same pattern works with Express/Fastify/Next.js)
+import { createHonoTrace, getTraceContext } from 'agent-telemetry/hono'
+import { formatTraceparent, parseTraceparent } from 'agent-telemetry'
 
-const trace = createBrowserTraceContext({
-  // Optional SSR bootstrap: <meta name="agent-telemetry-traceparent" content="00-...">
-  initialTraceparent: document.querySelector('meta[name="agent-telemetry-traceparent"]')?.getAttribute('content'),
+app.use('*', createHonoTrace({ telemetry }))
+
+app.get('/', (c) => {
+  // getTraceContext returns { _trace: { traceparent: "00-..." } }
+  const ctx = getTraceContext(c)
+  const traceparent = '_trace' in ctx ? ctx._trace.traceparent : ''
+
+  return c.html(`<!doctype html>
+<html>
+<head>
+  <meta name="agent-telemetry-traceparent" content="${traceparent}" />
+</head>
+<body>
+  <div id="app"></div>
+  <script type="module" src="/client.js"></script>
+</body>
+</html>`)
 })
-
-const fetch = createBrowserTracedFetch({
-  trace,
-  // Default is same-origin only. Keep this allowlist strict.
-  propagateTo: (url) => url.origin === window.location.origin,
-})
-
-await fetch('/api/users')
 ```
 
-- `createBrowserTraceContext()` bootstraps from `initialTraceparent`, then `<meta name="agent-telemetry-traceparent">`, then fresh IDs
-- `createBrowserTracedFetch()` injects W3C `traceparent` on allowed requests and can adopt response `traceparent`
-- `trace.withSpan(name, fn)` creates a child span for user actions and restores the previous parent span after completion
-- Response adoption is **disabled by default** -- set `updateContextFromResponse: true` to enable
+### Step 2: Browser Bootstrap
+
+The browser reads the meta tag automatically. No manual parsing needed -- `createBrowserTraceContext()` checks `<meta name="agent-telemetry-traceparent">` by default.
+
+```typescript
+// client.ts
+import { createBrowserTraceContext, createBrowserTracedFetch } from 'agent-telemetry/browser'
+
+// Bootstraps from <meta name="agent-telemetry-traceparent"> automatically
+const trace = createBrowserTraceContext()
+
+// Wrap fetch to inject traceparent on same-origin requests
+const tracedFetch = createBrowserTracedFetch({
+  trace,
+  propagateTo: (url) => url.origin === window.location.origin,
+})
+```
+
+### Step 3: Traced API Calls
+
+Every `tracedFetch` call sends the `traceparent` header. The server adapter picks it up and continues the same trace.
+
+```typescript
+// Simple fetch -- traceparent injected automatically
+const response = await tracedFetch('/api/users/123')
+
+// Group multiple calls under a named span
+const result = await trace.withSpan('checkout', async (ctx) => {
+  // Both calls share the same parent span
+  const cart = await tracedFetch('/api/cart')
+  const order = await tracedFetch('/api/orders', {
+    method: 'POST',
+    body: JSON.stringify({ items: await cart.json() }),
+  })
+  return order.json()
+})
+```
+
+### What the Trace Looks Like
+
+A single user action produces a connected trace across browser and server:
+
+```
+Browser                          Server
+-------                          ------
+[page load]
+  meta tag: 00-{traceId}-{spanA}-01
+                                 GET / -> http.request (spanA)
+
+[user clicks "checkout"]
+  withSpan("checkout")
+    tracedFetch /api/cart ------> GET /api/cart -> http.request (spanB, parent=spanA)
+                                   db.query (spanC, parent=spanB)
+    tracedFetch /api/orders ----> POST /api/orders -> http.request (spanD, parent=spanA)
+                                   db.query (spanE, parent=spanD)
+                                   external.call (spanF, parent=spanD)
+```
+
+All spans share one `trace_id`. Query with `jq 'select(.trace_id == "...")'` to see the full chain from page render through checkout.
+
+### API Reference
+
+- `createBrowserTraceContext(options?)` -- creates the trace context manager
+  - Bootstraps from: `initialTraceparent` option -> `<meta name="agent-telemetry-traceparent">` -> fresh IDs
+  - `trace.getTraceparent()` returns the current W3C traceparent string
+  - `trace.withSpan(name, fn)` creates a child span, restores the parent after completion
+  - Custom meta tag name: pass `metaName: "my-custom-name"` for backwards compatibility
+
+- `createBrowserTracedFetch(options?)` -- wraps `fetch` with trace propagation
+  - `propagateTo` controls which origins receive the `traceparent` header (default: same-origin only)
+  - Response adoption is **disabled by default** -- set `updateContextFromResponse: true` to enable
+  - Does not emit telemetry events (the server adapter handles that)
 
 ## Prisma Adapter
 

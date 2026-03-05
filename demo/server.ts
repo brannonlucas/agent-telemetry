@@ -575,7 +575,7 @@ app.get("/", (c) => {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <meta name="traceparent" content="${bootstrapTraceparent}" />
+  <meta name="agent-telemetry-traceparent" content="${bootstrapTraceparent}" />
   <title>agent-telemetry demo</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -696,7 +696,7 @@ app.get("/", (c) => {
     <header class="header">
       <div class="header-row">
         <h1>agent-telemetry</h1>
-        <span class="version">v0.3.0</span>
+        <span class="version">v0.9.0</span>
       </div>
       <p class="header-desc">
         Browser-to-backend distributed trace demo. One <code>traceparent</code> header connects every span.
