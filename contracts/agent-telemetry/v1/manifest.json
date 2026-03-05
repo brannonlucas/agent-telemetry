@@ -1,0 +1,49 @@
+{
+	"spec_version": 1,
+	"contract_version": "1.0.0",
+	"generated": "2026-03-05",
+	"artifacts": {
+		"schema/event.base.schema.json": {
+			"sha256": "16f227b64a6eab92681686560389a279bf42bf65d0b17432bf681df7118e09fe"
+		},
+		"schema/diagnostic.schema.json": {
+			"sha256": "4b240aafecd162898dfd801e7286b8cdc97b5033e830f313ad9edd0ef175d8d1"
+		},
+		"schema/trace-summary.schema.json": {
+			"sha256": "d7e7e3f84fe9c0b3deb87de8534d2d63162a192ae0d68b0372a39eec763464f2"
+		},
+		"schema/kinds/http.request.schema.json": {
+			"sha256": "708345e607c5d81add5a0f266a19bd289d6f0e42325eff367b355cb8376f556a"
+		},
+		"schema/kinds/db.query.schema.json": {
+			"sha256": "364c50ed4d27a85de64d5359eaa6766ed3222d6193364294b00282309cb118de"
+		},
+		"schema/kinds/external.call.schema.json": {
+			"sha256": "1cd601529fb70c10f18ac467d2c5eb5a2377cdf34a9ebadecf2686c789689310"
+		},
+		"schema/kinds/job.start.schema.json": {
+			"sha256": "b834bce2daea646746acbd1d1a232f3c819e49d5af1e5d4ca9d6794fd577388e"
+		},
+		"schema/kinds/job.end.schema.json": {
+			"sha256": "4093a7c92b1c54891078b502756c791ba77829674b9720069ad935eb96ea3c16"
+		},
+		"schema/kinds/job.dispatch.schema.json": {
+			"sha256": "a58bb4bd39fe860148f10dccbf11fd045e565b1f970308258c37716e8e3889c0"
+		},
+		"limits.json": {
+			"sha256": "0ac1d386c434089fda169527b349b48784e9d7609959b2d61f81dc9901f628ed"
+		},
+		"enums.json": {
+			"sha256": "3d1bfc9d29bf0ab325be8a4f5c06b9eddd2d1c5fab623295d1b463b048280d6a"
+		},
+		"regex.json": {
+			"sha256": "8de5501ecf0f986667909c89eb1dd064ccb54cb7b6f3789309fd04eb31c70912"
+		},
+		"glossary.json": {
+			"sha256": "f17078bbdda27a27cb8fdb9cbe567031b01ab5865cd9d9cbd0df2fdc0944ad54"
+		},
+		"negative-vectors.json": {
+			"sha256": "a38f3825379a398b9b79db89d9ba199a1f79224ee080615088455a37a3342a33"
+		}
+	}
+}

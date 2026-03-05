@@ -6,6 +6,8 @@ description = "Test data and doc example allowlist"
 paths = [
   '''tests/.*\.test\.ts''',
   '''demo/.*\.ts''',
+  '''contracts/.*/manifest\.json''',
+  '''src/consumer/pipeline\.ts''',
 ]
 
 [[rules]]

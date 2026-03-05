@@ -1,0 +1,16 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "https://agent-telemetry.dev/v1/schema/kinds/job.end.schema.json",
+	"title": "Job End Event",
+	"allOf": [{ "$ref": "../event.base.schema.json" }],
+	"properties": {
+		"kind": { "const": "job.end" },
+		"task_name": { "type": "string", "maxLength": 128 },
+		"task_id": { "type": "string", "maxLength": 128 },
+		"queue": { "type": "string", "maxLength": 128 },
+		"attempt": { "type": "integer", "minimum": 0 },
+		"duration_ms": { "type": "integer", "minimum": 0 },
+		"outcome": { "type": "string", "enum": ["success", "error"] }
+	},
+	"required": ["kind", "span_id", "task_name", "duration_ms", "outcome"]
+}

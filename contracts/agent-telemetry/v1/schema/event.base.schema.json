@@ -1,0 +1,28 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "https://agent-telemetry.dev/v1/schema/event.base.schema.json",
+	"title": "Base Telemetry Event",
+	"type": "object",
+	"required": ["record_type", "spec_version", "kind", "trace_id"],
+	"properties": {
+		"record_type": { "const": "event" },
+		"spec_version": { "const": 1 },
+		"kind": {
+			"type": "string",
+			"pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$",
+			"maxLength": 64
+		},
+		"trace_id": { "type": "string", "pattern": "^[0-9a-f]{32}$" },
+		"span_id": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
+		"parent_span_id": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
+		"timestamp": { "type": "string", "format": "date-time" },
+		"outcome": { "type": "string", "enum": ["success", "error"] },
+		"duration_ms": { "type": "integer", "minimum": 0 },
+		"error_name": { "type": "string", "maxLength": 120 },
+		"entities": {
+			"type": "object",
+			"additionalProperties": { "type": "string" }
+		}
+	},
+	"additionalProperties": true
+}

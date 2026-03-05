@@ -1,0 +1,14 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "https://agent-telemetry.dev/v1/schema/kinds/job.start.schema.json",
+	"title": "Job Start Event",
+	"allOf": [{ "$ref": "../event.base.schema.json" }],
+	"properties": {
+		"kind": { "const": "job.start" },
+		"task_name": { "type": "string", "maxLength": 128 },
+		"task_id": { "type": "string", "maxLength": 128 },
+		"queue": { "type": "string", "maxLength": 128 },
+		"attempt": { "type": "integer", "minimum": 0 }
+	},
+	"required": ["kind", "span_id", "task_name"]
+}

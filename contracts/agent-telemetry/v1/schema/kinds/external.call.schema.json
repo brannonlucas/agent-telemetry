@@ -1,0 +1,15 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "https://agent-telemetry.dev/v1/schema/kinds/external.call.schema.json",
+	"title": "External Service Call Event",
+	"allOf": [{ "$ref": "../event.base.schema.json" }],
+	"properties": {
+		"kind": { "const": "external.call" },
+		"service": { "type": "string", "maxLength": 128 },
+		"operation": { "type": "string", "maxLength": 256 },
+		"duration_ms": { "type": "integer", "minimum": 0 },
+		"outcome": { "type": "string", "enum": ["success", "error"] },
+		"status_code": { "type": "integer" }
+	},
+	"required": ["kind", "service", "operation", "duration_ms", "outcome"]
+}

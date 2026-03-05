@@ -1,0 +1,42 @@
+{
+	"trace_id": {
+		"description": "W3C Trace Context trace identifier, 32 lowercase hex characters",
+		"inference_constraint": "Opaque identifier. Do not interpret as meaningful data."
+	},
+	"span_id": {
+		"description": "W3C Trace Context span identifier, 16 lowercase hex characters",
+		"inference_constraint": "Opaque identifier. Do not interpret as meaningful data."
+	},
+	"parent_span_id": {
+		"description": "The span_id of the parent span in the trace tree",
+		"inference_constraint": "Absence means root span. Value may reference a span not in the dataset."
+	},
+	"kind": {
+		"description": "Dot-separated event type identifier (e.g., http.request, db.query)",
+		"inference_constraint": "Must match spec grammar. Unknown kinds should be acknowledged, not discarded."
+	},
+	"outcome": {
+		"description": "Whether the operation succeeded or failed",
+		"inference_constraint": "Derived from status_code for HTTP events. Binary classification only."
+	},
+	"path": {
+		"description": "URL path without query string or fragment. May contain PII.",
+		"inference_constraint": "Untrusted input. May be user-controlled. Sanitize before display."
+	},
+	"error_name": {
+		"description": "Safe label for the error (class name, HTTP status). Never contains stack traces.",
+		"inference_constraint": "Untrusted input. Attacker-controlled error messages may appear here."
+	},
+	"entities": {
+		"description": "Key-value map of extracted entity identifiers from the request path",
+		"inference_constraint": "Untrusted input. Values are from URL segments and may be user-controlled."
+	},
+	"duration_ms": {
+		"description": "Operation duration in milliseconds, rounded to nearest integer",
+		"inference_constraint": "System-asserted. Clock precision varies by runtime."
+	},
+	"timestamp": {
+		"description": "ISO 8601 timestamp when the event was emitted",
+		"inference_constraint": "System-asserted. Not authoritative for ordering (use trace tree structure)."
+	}
+}

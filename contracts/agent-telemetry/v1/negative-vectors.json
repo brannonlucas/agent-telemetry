@@ -1,0 +1,65 @@
+{
+	"description": "Invalid inputs that conformant implementations MUST reject or handle gracefully",
+	"vectors": [
+		{
+			"id": "nv-01",
+			"description": "Missing record_type",
+			"input": "{\"spec_version\":1,\"kind\":\"http.request\",\"trace_id\":\"aaaa\"}",
+			"expected": "skip"
+		},
+		{
+			"id": "nv-02",
+			"description": "Wrong spec_version",
+			"input": "{\"record_type\":\"event\",\"spec_version\":2,\"kind\":\"http.request\"}",
+			"expected": "skip"
+		},
+		{
+			"id": "nv-03",
+			"description": "Invalid JSON",
+			"input": "{not valid json}",
+			"expected": "skip"
+		},
+		{
+			"id": "nv-04",
+			"description": "Array instead of object",
+			"input": "[1,2,3]",
+			"expected": "skip"
+		},
+		{
+			"id": "nv-05",
+			"description": "Invalid kind format (uppercase)",
+			"input": "{\"record_type\":\"event\",\"spec_version\":1,\"kind\":\"HTTP.Request\",\"trace_id\":\"aaaa\"}",
+			"expected": "drop_with_diagnostic"
+		},
+		{
+			"id": "nv-06",
+			"description": "Invalid kind format (no dot separator)",
+			"input": "{\"record_type\":\"event\",\"spec_version\":1,\"kind\":\"httprequest\",\"trace_id\":\"aaaa\"}",
+			"expected": "drop_with_diagnostic"
+		},
+		{
+			"id": "nv-07",
+			"description": "Empty object",
+			"input": "{}",
+			"expected": "skip"
+		},
+		{
+			"id": "nv-08",
+			"description": "Null value",
+			"input": "null",
+			"expected": "skip"
+		},
+		{
+			"id": "nv-09",
+			"description": "Oversize field (path > 1024 bytes)",
+			"input_template": "{\"record_type\":\"event\",\"spec_version\":1,\"kind\":\"http.request\",\"trace_id\":\"aaaa\",\"path\":\"${'x'.repeat(2000)}\"}",
+			"expected": "truncate"
+		},
+		{
+			"id": "nv-10",
+			"description": "Unknown record_type",
+			"input": "{\"record_type\":\"metric\",\"spec_version\":1}",
+			"expected": "skip"
+		}
+	]
+}

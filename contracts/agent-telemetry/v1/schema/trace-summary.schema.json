@@ -1,0 +1,85 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "https://agent-telemetry.dev/v1/schema/trace-summary.schema.json",
+	"title": "Trace Summary",
+	"type": "object",
+	"required": [
+		"spec_version",
+		"trace_id",
+		"event_count",
+		"diagnostic_count",
+		"truncation_count",
+		"root_span_ids",
+		"events",
+		"diagnostics",
+		"uncertainties",
+		"entities"
+	],
+	"properties": {
+		"spec_version": { "const": 1 },
+		"trace_id": { "type": "string" },
+		"event_count": { "type": "integer", "minimum": 0 },
+		"diagnostic_count": { "type": "integer", "minimum": 0 },
+		"truncation_count": { "type": "integer", "minimum": 0 },
+		"root_span_ids": {
+			"type": "array",
+			"items": { "type": "string" }
+		},
+		"events": {
+			"type": "array",
+			"items": {
+				"type": "object",
+				"required": ["event_index", "kind", "attributes", "trust", "source_file", "source_line"],
+				"properties": {
+					"event_index": { "type": "integer", "minimum": 0 },
+					"kind": { "type": "string" },
+					"attributes": { "type": "object" },
+					"trust": {
+						"type": "object",
+						"additionalProperties": {
+							"type": "string",
+							"enum": ["system_asserted", "untrusted_input", "derived", "unknown"]
+						}
+					},
+					"source_file": { "type": "string" },
+					"source_line": { "type": "integer", "minimum": 1 }
+				}
+			}
+		},
+		"diagnostics": {
+			"type": "array",
+			"items": {
+				"type": "object",
+				"required": ["code", "message", "source_file", "source_line"],
+				"properties": {
+					"code": { "type": "string" },
+					"message": { "type": "string" },
+					"level": { "type": "string" },
+					"source_file": { "type": "string" },
+					"source_line": { "type": "integer", "minimum": 1 }
+				}
+			}
+		},
+		"uncertainties": {
+			"type": "array",
+			"items": {
+				"type": "object",
+				"required": ["code", "severity", "count", "message"],
+				"properties": {
+					"code": { "type": "string" },
+					"severity": { "type": "string", "enum": ["info", "warn", "error"] },
+					"count": { "type": "integer", "minimum": 1 },
+					"message": { "type": "string" }
+				}
+			}
+		},
+		"entities": {
+			"type": "object",
+			"additionalProperties": {
+				"type": "array",
+				"items": { "type": "string" }
+			}
+		}
+	},
+	"additionalProperties": false
+}

@@ -1,0 +1,7 @@
+{
+	"outcome": ["success", "error"],
+	"diagnostic_level": ["debug", "info", "warn", "error"],
+	"trust_class": ["system_asserted", "untrusted_input", "derived", "unknown"],
+	"record_type": ["event", "diagnostic"],
+	"uncertainty_severity": ["info", "warn", "error"]
+}

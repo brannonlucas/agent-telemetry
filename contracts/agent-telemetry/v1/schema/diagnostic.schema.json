@@ -1,0 +1,29 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "https://agent-telemetry.dev/v1/schema/diagnostic.schema.json",
+	"title": "Diagnostic Record",
+	"type": "object",
+	"required": ["record_type", "spec_version", "code", "message"],
+	"properties": {
+		"record_type": { "const": "diagnostic" },
+		"spec_version": { "const": 1 },
+		"timestamp": { "type": "string", "format": "date-time" },
+		"code": { "type": "string", "maxLength": 96 },
+		"message": { "type": "string", "maxLength": 256 },
+		"level": { "type": "string", "enum": ["debug", "info", "warn", "error"] },
+		"details": {
+			"type": "object",
+			"additionalProperties": {
+				"oneOf": [
+					{ "type": "string" },
+					{ "type": "number" },
+					{ "type": "boolean" },
+					{ "type": "null" }
+				]
+			}
+		},
+		"related_kind": { "type": "string" },
+		"related_trace_id": { "type": "string" }
+	},
+	"additionalProperties": false
+}

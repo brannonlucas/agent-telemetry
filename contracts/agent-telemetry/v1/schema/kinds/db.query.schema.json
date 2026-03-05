@@ -1,0 +1,15 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "https://agent-telemetry.dev/v1/schema/kinds/db.query.schema.json",
+	"title": "Database Query Event",
+	"allOf": [{ "$ref": "../event.base.schema.json" }],
+	"properties": {
+		"kind": { "const": "db.query" },
+		"provider": { "type": "string", "maxLength": 64 },
+		"model": { "type": "string", "maxLength": 128 },
+		"operation": { "type": "string", "maxLength": 128 },
+		"duration_ms": { "type": "integer", "minimum": 0 },
+		"outcome": { "type": "string", "enum": ["success", "error"] }
+	},
+	"required": ["kind", "provider", "operation", "duration_ms", "outcome"]
+}

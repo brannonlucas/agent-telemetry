@@ -1,0 +1,16 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "https://agent-telemetry.dev/v1/schema/kinds/http.request.schema.json",
+	"title": "HTTP Request Event",
+	"allOf": [{ "$ref": "../event.base.schema.json" }],
+	"properties": {
+		"kind": { "const": "http.request" },
+		"method": { "type": "string" },
+		"path": { "type": "string", "maxLength": 1024 },
+		"route": { "type": "string", "maxLength": 256 },
+		"status_code": { "type": "integer", "minimum": 100, "maximum": 599 },
+		"outcome": { "type": "string", "enum": ["success", "error"] },
+		"duration_ms": { "type": "integer", "minimum": 0 }
+	},
+	"required": ["kind", "method", "path", "status_code", "outcome", "duration_ms"]
+}
