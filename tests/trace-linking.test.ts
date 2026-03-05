@@ -3,6 +3,7 @@ import { createExpressTrace, getTraceContext } from "../src/adapters/express.ts"
 import type { FetchFn } from "../src/adapters/fetch.ts";
 import { createTracedFetch } from "../src/adapters/fetch.ts";
 import { type PrismaTraceExtension, createPrismaTrace } from "../src/adapters/prisma.ts";
+import { parseTraceparent } from "../src/traceparent.ts";
 import type { DbQueryEvent, ExternalCallEvent, HttpRequestEvent } from "../src/types.ts";
 
 interface MockRequest {
@@ -77,8 +78,14 @@ describe("trace linking", () => {
 		const httpEvents: HttpRequestEvent[] = [];
 		const dbEvents: DbQueryEvent[] = [];
 
-		const httpTelemetry = { emit: (event: HttpRequestEvent) => httpEvents.push(event) };
-		const dbTelemetry = { emit: (event: DbQueryEvent) => dbEvents.push(event) };
+		const httpTelemetry = {
+			emit: (event: HttpRequestEvent) => httpEvents.push(event),
+			flush: () => Promise.resolve(),
+		};
+		const dbTelemetry = {
+			emit: (event: DbQueryEvent) => dbEvents.push(event),
+			flush: () => Promise.resolve(),
+		};
 
 		const middleware = createExpressTrace({ telemetry: httpTelemetry });
 
@@ -94,7 +101,14 @@ describe("trace linking", () => {
 				telemetry: dbTelemetry,
 				getTraceContext: () => {
 					const ctx = getTraceContext(req);
-					return "_trace" in ctx ? ctx._trace : undefined;
+					if (!("_trace" in ctx)) return undefined;
+					const parsed = parseTraceparent(ctx._trace.traceparent);
+					if (!parsed) return undefined;
+					return {
+						trace_id: parsed.traceId,
+						parent_span_id: parsed.parentId,
+						trace_flags: parsed.traceFlags,
+					};
 				},
 			});
 
@@ -125,14 +139,17 @@ describe("trace linking", () => {
 			});
 		};
 
-		const externalTelemetry = { emit: (event: ExternalCallEvent) => externalEvents.push(event) };
+		const externalTelemetry = {
+			emit: (event: ExternalCallEvent) => externalEvents.push(event),
+			flush: () => Promise.resolve(),
+		};
 		const fetch = createTracedFetch({
 			telemetry: externalTelemetry,
 			baseFetch,
 			getTraceContext: () => ({
-				traceId: "a".repeat(32),
-				parentSpanId: "b".repeat(16),
-				traceFlags: "01",
+				trace_id: "a".repeat(32),
+				parent_span_id: "b".repeat(16),
+				trace_flags: "01",
 			}),
 			propagateTo: () => true,
 		});
@@ -147,9 +164,9 @@ describe("trace linking", () => {
 		const http = httpEvents[0];
 		const db = dbEvents[0];
 
-		expect(external.traceId).toBe(http.traceId);
-		expect(http.traceId).toBe(db.traceId);
-		expect(http.parentSpanId).toBe(external.spanId);
-		expect(db.parentSpanId).toBe(http.spanId);
+		expect(external.trace_id).toBe(http.trace_id);
+		expect(http.trace_id).toBe(db.trace_id);
+		expect(http.parent_span_id).toBe(external.span_id);
+		expect(db.parent_span_id).toBe(http.span_id);
 	});
 });

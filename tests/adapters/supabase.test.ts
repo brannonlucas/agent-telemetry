@@ -10,13 +10,13 @@ function createTestHarness(overrides?: {
 	baseFetch?: FetchFn;
 	isEnabled?: () => boolean;
 	getTraceContext?: () =>
-		| { traceId: string; parentSpanId: string; traceFlags?: string }
+		| { trace_id: string; parent_span_id: string; trace_flags?: string }
 		| undefined;
 }) {
 	const emitted: unknown[] = [];
-	const telemetry = { emit: (e: unknown) => emitted.push(e) };
+	const telemetry = { emit: (e: unknown) => emitted.push(e), flush: () => Promise.resolve() };
 	const tracedFetch = createSupabaseTrace({
-		telemetry: telemetry as { emit: (e: SupabaseEvents) => void },
+		telemetry: telemetry as { emit: (e: SupabaseEvents) => void; flush: () => Promise<void> },
 		baseFetch: overrides?.baseFetch ?? mockFetch,
 		...overrides,
 	});
@@ -40,10 +40,10 @@ describe("createSupabaseTrace", () => {
 			expect(event.provider).toBe("supabase");
 			expect(event.model).toBe("users");
 			expect(event.operation).toBe("select");
-			expect(event.status).toBe("success");
+			expect(event.outcome).toBe("success");
 			expect(typeof event.duration_ms).toBe("number");
-			expect(typeof event.traceId).toBe("string");
-			expect(typeof event.spanId).toBe("string");
+			expect(typeof event.trace_id).toBe("string");
+			expect(typeof event.span_id).toBe("string");
 		});
 
 		it("emits db.query for POST /rest/v1/posts", async () => {
@@ -131,7 +131,7 @@ describe("createSupabaseTrace", () => {
 			expect(event.kind).toBe("external.call");
 			expect(event.service).toBe("supabase-auth");
 			expect(event.operation).toBe("token");
-			expect(event.status).toBe("success");
+			expect(event.outcome).toBe("success");
 		});
 
 		it("emits external.call for /auth/v1/signup", async () => {
@@ -256,8 +256,8 @@ describe("createSupabaseTrace", () => {
 			expect(emitted).toHaveLength(1);
 			const event = emitted[0] as Record<string, unknown>;
 			expect(event.kind).toBe("db.query");
-			expect(event.status).toBe("error");
-			expect(event.error).toBe("Error");
+			expect(event.outcome).toBe("error");
+			expect(event.error_name).toBe("Error");
 			expect(typeof event.duration_ms).toBe("number");
 		});
 
@@ -282,16 +282,16 @@ describe("createSupabaseTrace", () => {
 		it("uses trace context when provided", async () => {
 			const { emitted, tracedFetch } = createTestHarness({
 				getTraceContext: () => ({
-					traceId: "a".repeat(32),
-					parentSpanId: "b".repeat(16),
+					trace_id: "a".repeat(32),
+					parent_span_id: "b".repeat(16),
 				}),
 			});
 
 			await tracedFetch(`${SUPABASE_URL}/rest/v1/users`);
 
 			const event = emitted[0] as Record<string, unknown>;
-			expect(event.traceId).toBe("a".repeat(32));
-			expect(event.parentSpanId).toBe("b".repeat(16));
+			expect(event.trace_id).toBe("a".repeat(32));
+			expect(event.parent_span_id).toBe("b".repeat(16));
 		});
 
 		it("uses custom baseFetch", async () => {

@@ -18,10 +18,10 @@ function callAdapter(
 describe("createPrismaTrace", () => {
 	it("emits db.query event on successful query", async () => {
 		const emitted: unknown[] = [];
-		const telemetry = { emit: (e: unknown) => emitted.push(e) };
+		const telemetry = { emit: (e: unknown) => emitted.push(e), flush: () => Promise.resolve() };
 
 		const extension = createPrismaTrace({
-			telemetry: telemetry as { emit: (e: DbQueryEvent) => void },
+			telemetry: telemetry as { emit: (e: DbQueryEvent) => void; flush: () => Promise<void> },
 		});
 
 		await callAdapter(extension, {
@@ -37,18 +37,18 @@ describe("createPrismaTrace", () => {
 		expect(event.provider).toBe("prisma");
 		expect(event.model).toBe("User");
 		expect(event.operation).toBe("findMany");
-		expect(event.status).toBe("success");
+		expect(event.outcome).toBe("success");
 		expect(typeof event.duration_ms).toBe("number");
-		expect(typeof event.spanId).toBe("string");
-		expect((event.spanId as string).length).toBe(16);
+		expect(typeof event.span_id).toBe("string");
+		expect((event.span_id as string).length).toBe(16);
 	});
 
 	it("returns the query result unchanged", async () => {
 		const emitted: unknown[] = [];
-		const telemetry = { emit: (e: unknown) => emitted.push(e) };
+		const telemetry = { emit: (e: unknown) => emitted.push(e), flush: () => Promise.resolve() };
 
 		const extension = createPrismaTrace({
-			telemetry: telemetry as { emit: (e: DbQueryEvent) => void },
+			telemetry: telemetry as { emit: (e: DbQueryEvent) => void; flush: () => Promise<void> },
 		});
 
 		const expected = [{ id: 1, name: "Alice" }];
@@ -64,10 +64,10 @@ describe("createPrismaTrace", () => {
 
 	it("emits error event and re-throws on query failure", async () => {
 		const emitted: unknown[] = [];
-		const telemetry = { emit: (e: unknown) => emitted.push(e) };
+		const telemetry = { emit: (e: unknown) => emitted.push(e), flush: () => Promise.resolve() };
 
 		const extension = createPrismaTrace({
-			telemetry: telemetry as { emit: (e: DbQueryEvent) => void },
+			telemetry: telemetry as { emit: (e: DbQueryEvent) => void; flush: () => Promise<void> },
 		});
 
 		const queryError = new Error("connection refused");
@@ -93,17 +93,17 @@ describe("createPrismaTrace", () => {
 		expect(emitted).toHaveLength(1);
 		const event = emitted[0] as Record<string, unknown>;
 		expect(event.kind).toBe("db.query");
-		expect(event.status).toBe("error");
-		expect(event.error).toBe("Error");
+		expect(event.outcome).toBe("error");
+		expect(event.error_name).toBe("Error");
 		expect(typeof event.duration_ms).toBe("number");
 	});
 
 	it("sets provider to prisma", async () => {
 		const emitted: unknown[] = [];
-		const telemetry = { emit: (e: unknown) => emitted.push(e) };
+		const telemetry = { emit: (e: unknown) => emitted.push(e), flush: () => Promise.resolve() };
 
 		const extension = createPrismaTrace({
-			telemetry: telemetry as { emit: (e: DbQueryEvent) => void },
+			telemetry: telemetry as { emit: (e: DbQueryEvent) => void; flush: () => Promise<void> },
 		});
 
 		await callAdapter(extension, {
@@ -119,10 +119,10 @@ describe("createPrismaTrace", () => {
 
 	it("passes model and operation from params", async () => {
 		const emitted: unknown[] = [];
-		const telemetry = { emit: (e: unknown) => emitted.push(e) };
+		const telemetry = { emit: (e: unknown) => emitted.push(e), flush: () => Promise.resolve() };
 
 		const extension = createPrismaTrace({
-			telemetry: telemetry as { emit: (e: DbQueryEvent) => void },
+			telemetry: telemetry as { emit: (e: DbQueryEvent) => void; flush: () => Promise<void> },
 		});
 
 		await callAdapter(extension, {
@@ -139,11 +139,11 @@ describe("createPrismaTrace", () => {
 
 	it("skips tracing when isEnabled returns false", async () => {
 		const emitted: unknown[] = [];
-		const telemetry = { emit: (e: unknown) => emitted.push(e) };
+		const telemetry = { emit: (e: unknown) => emitted.push(e), flush: () => Promise.resolve() };
 
 		let queryCalled = false;
 		const extension = createPrismaTrace({
-			telemetry: telemetry as { emit: (e: DbQueryEvent) => void },
+			telemetry: telemetry as { emit: (e: DbQueryEvent) => void; flush: () => Promise<void> },
 			isEnabled: () => false,
 		});
 
@@ -166,13 +166,17 @@ describe("createPrismaTrace", () => {
 
 	it("uses trace context when getTraceContext is provided", async () => {
 		const emitted: unknown[] = [];
-		const telemetry = { emit: (e: unknown) => emitted.push(e) };
+		const telemetry = { emit: (e: unknown) => emitted.push(e), flush: () => Promise.resolve() };
 
 		const parentTraceId = "a".repeat(32);
 		const parentSpanId = "b".repeat(16);
 		const extension = createPrismaTrace({
-			telemetry: telemetry as { emit: (e: DbQueryEvent) => void },
-			getTraceContext: () => ({ traceId: parentTraceId, parentSpanId, traceFlags: "01" }),
+			telemetry: telemetry as { emit: (e: DbQueryEvent) => void; flush: () => Promise<void> },
+			getTraceContext: () => ({
+				trace_id: parentTraceId,
+				parent_span_id: parentSpanId,
+				trace_flags: "01",
+			}),
 		});
 
 		await callAdapter(extension, {
@@ -183,16 +187,16 @@ describe("createPrismaTrace", () => {
 		});
 
 		const event = emitted[0] as Record<string, unknown>;
-		expect(event.traceId).toBe(parentTraceId);
-		expect(event.parentSpanId).toBe(parentSpanId);
+		expect(event.trace_id).toBe(parentTraceId);
+		expect(event.parent_span_id).toBe(parentSpanId);
 	});
 
 	it("generates fresh traceId when no context", async () => {
 		const emitted: unknown[] = [];
-		const telemetry = { emit: (e: unknown) => emitted.push(e) };
+		const telemetry = { emit: (e: unknown) => emitted.push(e), flush: () => Promise.resolve() };
 
 		const extension = createPrismaTrace({
-			telemetry: telemetry as { emit: (e: DbQueryEvent) => void },
+			telemetry: telemetry as { emit: (e: DbQueryEvent) => void; flush: () => Promise<void> },
 		});
 
 		await callAdapter(extension, {
@@ -203,8 +207,8 @@ describe("createPrismaTrace", () => {
 		});
 
 		const event = emitted[0] as Record<string, unknown>;
-		expect(typeof event.traceId).toBe("string");
-		expect((event.traceId as string).length).toBe(32);
-		expect(event.traceId).toMatch(/^[\da-f]{32}$/);
+		expect(typeof event.trace_id).toBe("string");
+		expect((event.trace_id as string).length).toBe(32);
+		expect(event.trace_id).toMatch(/^[\da-f]{32}$/);
 	});
 });

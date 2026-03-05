@@ -70,9 +70,9 @@ function triggerEvent(res: MockResponse, event: string) {
 describe("createExpressTrace", () => {
 	it("emits http.request event on finish", () => {
 		const emitted: unknown[] = [];
-		const telemetry = { emit: (e: unknown) => emitted.push(e) };
+		const telemetry = { emit: (e: unknown) => emitted.push(e), flush: () => Promise.resolve() };
 		const middleware = createExpressTrace({
-			telemetry: telemetry as { emit: (e: unknown) => void },
+			telemetry: telemetry as { emit: (e: unknown) => void; flush: () => Promise<void> },
 		});
 
 		const req = createMockReq({ originalUrl: "/api/test" });
@@ -93,30 +93,32 @@ describe("createExpressTrace", () => {
 		expect(event.kind).toBe("http.request");
 		expect(event.method).toBe("GET");
 		expect(event.path).toBe("/api/test");
-		expect(event.status).toBe(200);
+		expect(event.status_code).toBe(200);
 		expect(typeof event.duration_ms).toBe("number");
 	});
 
 	it("sets traceparent response header", () => {
 		const emitted: unknown[] = [];
-		const telemetry = { emit: (e: unknown) => emitted.push(e) };
+		const telemetry = { emit: (e: unknown) => emitted.push(e), flush: () => Promise.resolve() };
 		const middleware = createExpressTrace({
-			telemetry: telemetry as { emit: (e: unknown) => void },
+			telemetry: telemetry as { emit: (e: unknown) => void; flush: () => Promise<void> },
 		});
 
 		const req = createMockReq();
 		const res = createMockRes();
 
 		middleware(req, res, () => {});
+		// traceparent is set in cleanup (spec §5.2), so trigger finish first
+		triggerEvent(res, "finish");
 
 		expect(res._headers.traceparent).toMatch(TRACEPARENT_RE);
 	});
 
 	it("propagates incoming traceparent header", () => {
 		const emitted: unknown[] = [];
-		const telemetry = { emit: (e: unknown) => emitted.push(e) };
+		const telemetry = { emit: (e: unknown) => emitted.push(e), flush: () => Promise.resolve() };
 		const middleware = createExpressTrace({
-			telemetry: telemetry as { emit: (e: unknown) => void },
+			telemetry: telemetry as { emit: (e: unknown) => void; flush: () => Promise<void> },
 		});
 
 		const incomingTraceId = "a".repeat(32);
@@ -129,6 +131,8 @@ describe("createExpressTrace", () => {
 		const res = createMockRes();
 
 		middleware(req, res, () => {});
+		// traceparent is set in cleanup (spec §5.2), so trigger finish first
+		triggerEvent(res, "finish");
 
 		const outgoing = res._headers.traceparent;
 		expect(outgoing).toMatch(TRACEPARENT_RE);
@@ -137,20 +141,18 @@ describe("createExpressTrace", () => {
 		// parent-id is a new span, not the incoming parent
 		expect(outgoing).not.toContain(incomingParentId);
 
-		triggerEvent(res, "finish");
-
 		const event = emitted[0] as Record<string, unknown>;
-		expect(event.traceId).toBe(incomingTraceId);
-		expect(event.parentSpanId).toBe(incomingParentId);
-		expect(typeof event.spanId).toBe("string");
-		expect((event.spanId as string).length).toBe(16);
+		expect(event.trace_id).toBe(incomingTraceId);
+		expect(event.parent_span_id).toBe(incomingParentId);
+		expect(typeof event.span_id).toBe("string");
+		expect((event.span_id as string).length).toBe(16);
 	});
 
 	it("uses req.originalUrl for path", () => {
 		const emitted: unknown[] = [];
-		const telemetry = { emit: (e: unknown) => emitted.push(e) };
+		const telemetry = { emit: (e: unknown) => emitted.push(e), flush: () => Promise.resolve() };
 		const middleware = createExpressTrace({
-			telemetry: telemetry as { emit: (e: unknown) => void },
+			telemetry: telemetry as { emit: (e: unknown) => void; flush: () => Promise<void> },
 		});
 
 		const req = createMockReq({
@@ -168,9 +170,9 @@ describe("createExpressTrace", () => {
 
 	it("strips query string from emitted path", () => {
 		const emitted: unknown[] = [];
-		const telemetry = { emit: (e: unknown) => emitted.push(e) };
+		const telemetry = { emit: (e: unknown) => emitted.push(e), flush: () => Promise.resolve() };
 		const middleware = createExpressTrace({
-			telemetry: telemetry as { emit: (e: unknown) => void },
+			telemetry: telemetry as { emit: (e: unknown) => void; flush: () => Promise<void> },
 		});
 
 		const req = createMockReq({
@@ -185,11 +187,11 @@ describe("createExpressTrace", () => {
 		expect(event.path).toBe("/api/test");
 	});
 
-	it("prefers req.route.path when available", () => {
+	it("emits concrete path and parameterized route separately", () => {
 		const emitted: unknown[] = [];
-		const telemetry = { emit: (e: unknown) => emitted.push(e) };
+		const telemetry = { emit: (e: unknown) => emitted.push(e), flush: () => Promise.resolve() };
 		const middleware = createExpressTrace({
-			telemetry: telemetry as { emit: (e: unknown) => void },
+			telemetry: telemetry as { emit: (e: unknown) => void; flush: () => Promise<void> },
 		});
 
 		const req = createMockReq({
@@ -202,14 +204,17 @@ describe("createExpressTrace", () => {
 		triggerEvent(res, "finish");
 
 		const event = emitted[0] as Record<string, unknown>;
-		expect(event.path).toBe("/api/users/:id");
+		// path is always the concrete request path (spec §5.2)
+		expect(event.path).toBe("/api/users/123");
+		// route is the optional parameterized pattern
+		expect(event.route).toBe("/api/users/:id");
 	});
 
 	it("extracts entities when patterns provided", () => {
 		const emitted: unknown[] = [];
-		const telemetry = { emit: (e: unknown) => emitted.push(e) };
+		const telemetry = { emit: (e: unknown) => emitted.push(e), flush: () => Promise.resolve() };
 		const middleware = createExpressTrace({
-			telemetry: telemetry as { emit: (e: unknown) => void },
+			telemetry: telemetry as { emit: (e: unknown) => void; flush: () => Promise<void> },
 			entityPatterns: [{ segment: "users", key: "userId" }],
 		});
 
@@ -229,9 +234,9 @@ describe("createExpressTrace", () => {
 
 	it("skips tracing when isEnabled returns false", () => {
 		const emitted: unknown[] = [];
-		const telemetry = { emit: (e: unknown) => emitted.push(e) };
+		const telemetry = { emit: (e: unknown) => emitted.push(e), flush: () => Promise.resolve() };
 		const middleware = createExpressTrace({
-			telemetry: telemetry as { emit: (e: unknown) => void },
+			telemetry: telemetry as { emit: (e: unknown) => void; flush: () => Promise<void> },
 			isEnabled: () => false,
 		});
 
@@ -250,9 +255,9 @@ describe("createExpressTrace", () => {
 
 	it("emits event on close when finish doesn't fire", () => {
 		const emitted: unknown[] = [];
-		const telemetry = { emit: (e: unknown) => emitted.push(e) };
+		const telemetry = { emit: (e: unknown) => emitted.push(e), flush: () => Promise.resolve() };
 		const middleware = createExpressTrace({
-			telemetry: telemetry as { emit: (e: unknown) => void },
+			telemetry: telemetry as { emit: (e: unknown) => void; flush: () => Promise<void> },
 		});
 
 		const req = createMockReq();
@@ -268,9 +273,9 @@ describe("createExpressTrace", () => {
 
 	it("does not double-emit on both finish and close", () => {
 		const emitted: unknown[] = [];
-		const telemetry = { emit: (e: unknown) => emitted.push(e) };
+		const telemetry = { emit: (e: unknown) => emitted.push(e), flush: () => Promise.resolve() };
 		const middleware = createExpressTrace({
-			telemetry: telemetry as { emit: (e: unknown) => void },
+			telemetry: telemetry as { emit: (e: unknown) => void; flush: () => Promise<void> },
 		});
 
 		const req = createMockReq();
@@ -285,9 +290,9 @@ describe("createExpressTrace", () => {
 
 	it("captures error status", () => {
 		const emitted: unknown[] = [];
-		const telemetry = { emit: (e: unknown) => emitted.push(e) };
+		const telemetry = { emit: (e: unknown) => emitted.push(e), flush: () => Promise.resolve() };
 		const middleware = createExpressTrace({
-			telemetry: telemetry as { emit: (e: unknown) => void },
+			telemetry: telemetry as { emit: (e: unknown) => void; flush: () => Promise<void> },
 		});
 
 		const req = createMockReq();
@@ -298,17 +303,17 @@ describe("createExpressTrace", () => {
 
 		expect(emitted).toHaveLength(1);
 		const event = emitted[0] as Record<string, unknown>;
-		expect(event.status).toBe(500);
-		expect(event.error).toBe("HTTP 500");
+		expect(event.status_code).toBe(500);
+		expect(event.error_name).toBe("HTTP 500");
 	});
 });
 
 describe("getTraceContext", () => {
 	it("returns trace context from middleware", () => {
 		const emitted: unknown[] = [];
-		const telemetry = { emit: (e: unknown) => emitted.push(e) };
+		const telemetry = { emit: (e: unknown) => emitted.push(e), flush: () => Promise.resolve() };
 		const middleware = createExpressTrace({
-			telemetry: telemetry as { emit: (e: unknown) => void },
+			telemetry: telemetry as { emit: (e: unknown) => void; flush: () => Promise<void> },
 		});
 
 		const req = createMockReq();
@@ -318,11 +323,10 @@ describe("getTraceContext", () => {
 
 		const ctx = getTraceContext(req);
 		const traceCtx = ctx as {
-			_trace: { traceId: string; parentSpanId: string };
+			_trace: { traceparent: string };
 		};
 		expect(traceCtx._trace).toBeDefined();
-		expect(traceCtx._trace.traceId).toMatch(/^[\da-f]{32}$/);
-		expect(traceCtx._trace.parentSpanId).toMatch(/^[\da-f]{16}$/);
+		expect(traceCtx._trace.traceparent).toMatch(/^00-[\da-f]{32}-[\da-f]{16}-[\da-f]{2}$/);
 	});
 
 	it("returns empty object when no middleware ran", () => {

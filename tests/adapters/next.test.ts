@@ -19,6 +19,7 @@ function createTelemetryMock(): {
 		emit(event) {
 			emitted.push(event);
 		},
+		flush: () => Promise.resolve(),
 	};
 	return { emitted, telemetry };
 }
@@ -135,7 +136,7 @@ describe("withNextTrace", () => {
 		expect(event.kind).toBe("http.request");
 		expect(event.method).toBe("POST");
 		expect(event.path).toBe("/api/users");
-		expect(event.status).toBe(201);
+		expect(event.status_code).toBe(201);
 		expect(typeof event.duration_ms).toBe("number");
 		expect(event.duration_ms).toBeGreaterThanOrEqual(0);
 	});
@@ -160,9 +161,9 @@ describe("withNextTrace", () => {
 
 		expect(emitted).toHaveLength(1);
 		const event = emitted[0];
-		expect(event.traceId).toBe(incomingTraceId);
-		expect(event.parentSpanId).toBe(incomingParentId);
-		expect(event.spanId).toMatch(/^[\da-f]{16}$/);
+		expect(event.trace_id).toBe(incomingTraceId);
+		expect(event.parent_span_id).toBe(incomingParentId);
+		expect(event.span_id).toMatch(/^[\da-f]{16}$/);
 	});
 
 	it("emits status 500 and rethrows on handler error", async () => {
@@ -179,8 +180,8 @@ describe("withNextTrace", () => {
 		expect(emitted).toHaveLength(1);
 
 		const event = emitted[0];
-		expect(event.status).toBe(500);
-		expect(event.error).toBe("TypeError");
+		expect(event.status_code).toBe(500);
+		expect(event.error_name).toBe("TypeError");
 	});
 
 	it("extracts entities from resolved request path", async () => {
@@ -225,7 +226,7 @@ describe("withActionTrace", () => {
 		const event = emitted[0];
 		expect(event.method).toBe("ACTION");
 		expect(event.path).toBe("createPost");
-		expect(event.status).toBe(200);
+		expect(event.status_code).toBe(200);
 		expect(typeof event.duration_ms).toBe("number");
 		expect(event.duration_ms).toBeGreaterThanOrEqual(0);
 	});
@@ -244,8 +245,8 @@ describe("withActionTrace", () => {
 		expect(emitted).toHaveLength(1);
 		const event = emitted[0];
 		expect(event.method).toBe("ACTION");
-		expect(event.status).toBe(500);
-		expect(event.error).toBe("RangeError");
+		expect(event.status_code).toBe(500);
+		expect(event.error_name).toBe("RangeError");
 	});
 });
 
@@ -259,9 +260,7 @@ describe("getTraceContext", () => {
 
 		expect(getTraceContext(request)).toEqual({
 			_trace: {
-				traceId,
-				parentSpanId,
-				traceFlags: "01",
+				traceparent: `00-${traceId}-${parentSpanId}-01`,
 			},
 		});
 	});

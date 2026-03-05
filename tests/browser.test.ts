@@ -21,9 +21,9 @@ describe("createBrowserTraceContext", () => {
 		});
 
 		expect(trace.getTraceContext()).toEqual({
-			traceId: incomingTraceId,
-			parentSpanId: incomingParentId,
-			traceFlags: "01",
+			trace_id: incomingTraceId,
+			parent_span_id: incomingParentId,
+			trace_flags: "01",
 		});
 	});
 
@@ -31,9 +31,9 @@ describe("createBrowserTraceContext", () => {
 		const trace = createBrowserTraceContext({ initialTraceparent: "invalid" });
 		const ctx = trace.getTraceContext();
 
-		expect(ctx.traceId).toMatch(/^[\da-f]{32}$/);
-		expect(ctx.parentSpanId).toMatch(/^[\da-f]{16}$/);
-		expect(ctx.traceFlags).toBe("01");
+		expect(ctx.trace_id).toMatch(/^[\da-f]{32}$/);
+		expect(ctx.parent_span_id).toMatch(/^[\da-f]{16}$/);
+		expect(ctx.trace_flags).toBe("01");
 	});
 
 	it("withSpan uses child span and restores parent span afterward", async () => {
@@ -41,19 +41,19 @@ describe("createBrowserTraceContext", () => {
 			initialTraceparent: `00-${"a".repeat(32)}-${"b".repeat(16)}-01`,
 		});
 
-		const before = trace.getTraceContext().parentSpanId;
+		const before = trace.getTraceContext().parent_span_id;
 		let insideParent: string | undefined;
 		let insideSpan: string | undefined;
 
 		await trace.withSpan("ui.click", async (ctx) => {
-			insideParent = ctx.parentSpanId;
-			insideSpan = ctx.spanId;
+			insideParent = ctx.parent_span_id;
+			insideSpan = ctx.span_id;
 		});
 
 		expect(insideParent).toMatch(/^[\da-f]{16}$/);
 		expect(insideSpan).toMatch(/^[\da-f]{16}$/);
 		expect(insideParent).toBe(insideSpan);
-		expect(trace.getTraceContext().parentSpanId).toBe(before);
+		expect(trace.getTraceContext().parent_span_id).toBe(before);
 	});
 });
 
@@ -132,7 +132,33 @@ describe("createBrowserTracedFetch", () => {
 		}
 	});
 
-	it("updates context from response traceparent", async () => {
+	it("does not update context from response traceparent by default", async () => {
+		const responseTraceId = "c".repeat(32);
+		const responseSpanId = "d".repeat(16);
+		const baseFetch: FetchFn = async () =>
+			new Response("ok", {
+				status: 200,
+				headers: {
+					traceparent: `00-${responseTraceId}-${responseSpanId}-01`,
+				},
+			});
+		const initialTraceId = "a".repeat(32);
+		const trace = createBrowserTraceContext({
+			initialTraceparent: `00-${initialTraceId}-${"b".repeat(16)}-01`,
+		});
+		const fetch = createBrowserTracedFetch({
+			baseFetch,
+			trace,
+			propagateTo: () => true,
+		});
+
+		await fetch("https://api.example.com/users");
+
+		// Default is updateContextFromResponse: false — context should NOT change
+		expect(trace.getTraceContext().trace_id).toBe(initialTraceId);
+	});
+
+	it("updates context from response traceparent when opted in", async () => {
 		const responseTraceId = "c".repeat(32);
 		const responseSpanId = "d".repeat(16);
 		const baseFetch: FetchFn = async () =>
@@ -149,14 +175,15 @@ describe("createBrowserTracedFetch", () => {
 			baseFetch,
 			trace,
 			propagateTo: () => true,
+			updateContextFromResponse: true,
 		});
 
 		await fetch("https://api.example.com/users");
 
 		expect(trace.getTraceContext()).toEqual({
-			traceId: responseTraceId,
-			parentSpanId: responseSpanId,
-			traceFlags: "01",
+			trace_id: responseTraceId,
+			parent_span_id: responseSpanId,
+			trace_flags: "01",
 		});
 	});
 });

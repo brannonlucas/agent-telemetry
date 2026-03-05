@@ -14,6 +14,7 @@ function createTelemetryMock(): {
 		emit(event) {
 			emitted.push(event);
 		},
+		flush: () => Promise.resolve(),
 	};
 	return { emitted, telemetry };
 }
@@ -35,9 +36,9 @@ describe("createFastifyTrace", () => {
 		expect(event.kind).toBe("http.request");
 		expect(event.method).toBe("GET");
 		expect(event.path).toBe("/test");
-		expect(event.status).toBe(200);
+		expect(event.status_code).toBe(200);
 		expect(typeof event.duration_ms).toBe("number");
-		expect(typeof event.traceId).toBe("string");
+		expect(typeof event.trace_id).toBe("string");
 	});
 
 	it("sets traceparent response header", async () => {
@@ -77,10 +78,10 @@ describe("createFastifyTrace", () => {
 		expect(outgoing).not.toContain(incomingParentId);
 
 		const event = emitted[0];
-		expect(event.traceId).toBe(incomingTraceId);
-		expect(event.parentSpanId).toBe(incomingParentId);
-		expect(typeof event.spanId).toBe("string");
-		expect(event.spanId?.length).toBe(16);
+		expect(event.trace_id).toBe(incomingTraceId);
+		expect(event.parent_span_id).toBe(incomingParentId);
+		expect(typeof event.span_id).toBe("string");
+		expect(event.span_id?.length).toBe(16);
 	});
 
 	it("strips query string from emitted path", async () => {
@@ -100,7 +101,7 @@ describe("createFastifyTrace", () => {
 		expect(event.path).toBe("/search");
 	});
 
-	it("uses routeOptions.url for parameterized path", async () => {
+	it("emits concrete path and parameterized route separately", async () => {
 		const app = Fastify();
 		const { emitted, telemetry } = createTelemetryMock();
 
@@ -114,7 +115,10 @@ describe("createFastifyTrace", () => {
 
 		expect(res.statusCode).toBe(200);
 		const event = emitted[0];
-		expect(event.path).toBe("/users/:id");
+		// path is always the concrete request path (spec §5.2)
+		expect(event.path).toBe("/users/123");
+		// route is the optional parameterized pattern
+		expect(event.route).toBe("/users/:id");
 	});
 
 	it("measures duration via reply.elapsedTime", async () => {
@@ -190,10 +194,7 @@ describe("getTraceContext", () => {
 
 		await app.register(createFastifyTrace({ telemetry }));
 
-		let ctx:
-			| { _trace: { traceId: string; parentSpanId: string } }
-			| Record<string, never>
-			| undefined;
+		let ctx: { _trace: { traceparent: string } } | Record<string, never> | undefined;
 
 		app.get("/test", async (request) => {
 			ctx = getTraceContext(request);
@@ -204,20 +205,16 @@ describe("getTraceContext", () => {
 
 		expect(ctx).toBeDefined();
 		const traceCtx = ctx as {
-			_trace: { traceId: string; parentSpanId: string };
+			_trace: { traceparent: string };
 		};
 		expect(traceCtx._trace).toBeDefined();
-		expect(traceCtx._trace.traceId).toMatch(/^[\da-f]{32}$/);
-		expect(traceCtx._trace.parentSpanId).toMatch(/^[\da-f]{16}$/);
+		expect(traceCtx._trace.traceparent).toMatch(/^00-[\da-f]{32}-[\da-f]{16}-[\da-f]{2}$/);
 	});
 
 	it("returns empty object when no plugin registered", async () => {
 		const app = Fastify();
 
-		let ctx:
-			| { _trace: { traceId: string; parentSpanId: string } }
-			| Record<string, never>
-			| undefined;
+		let ctx: { _trace: { traceparent: string } } | Record<string, never> | undefined;
 
 		app.get("/test", async (request) => {
 			ctx = getTraceContext(request);

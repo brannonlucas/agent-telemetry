@@ -62,9 +62,9 @@ describe("createHonoTrace", () => {
 
 	it("emits http.request event", async () => {
 		const emitted: unknown[] = [];
-		const telemetry = { emit: (e: unknown) => emitted.push(e) };
+		const telemetry = { emit: (e: unknown) => emitted.push(e), flush: () => Promise.resolve() };
 		const trace = createHonoTrace({
-			telemetry: telemetry as { emit: (e: unknown) => void },
+			telemetry: telemetry as { emit: (e: unknown) => void; flush: () => Promise<void> },
 		});
 
 		const app = new Hono();
@@ -78,15 +78,15 @@ describe("createHonoTrace", () => {
 		expect(event.kind).toBe("http.request");
 		expect(event.method).toBe("GET");
 		expect(event.path).toBe("/api/test");
-		expect(event.status).toBe(200);
+		expect(event.status_code).toBe(200);
 		expect(typeof event.duration_ms).toBe("number");
 	});
 
 	it("emits span linkage from incoming traceparent", async () => {
 		const emitted: unknown[] = [];
-		const telemetry = { emit: (e: unknown) => emitted.push(e) };
+		const telemetry = { emit: (e: unknown) => emitted.push(e), flush: () => Promise.resolve() };
 		const trace = createHonoTrace({
-			telemetry: telemetry as { emit: (e: unknown) => void },
+			telemetry: telemetry as { emit: (e: unknown) => void; flush: () => Promise<void> },
 		});
 
 		const app = new Hono();
@@ -100,17 +100,17 @@ describe("createHonoTrace", () => {
 		await app.request("/api/test", { headers: { traceparent: incoming } });
 
 		const event = emitted[0] as Record<string, unknown>;
-		expect(event.traceId).toBe(incomingTraceId);
-		expect(event.parentSpanId).toBe(incomingParentId);
-		expect(typeof event.spanId).toBe("string");
-		expect((event.spanId as string).length).toBe(16);
+		expect(event.trace_id).toBe(incomingTraceId);
+		expect(event.parent_span_id).toBe(incomingParentId);
+		expect(typeof event.span_id).toBe("string");
+		expect((event.span_id as string).length).toBe(16);
 	});
 
 	it("extracts entities when patterns are provided", async () => {
 		const emitted: unknown[] = [];
-		const telemetry = { emit: (e: unknown) => emitted.push(e) };
+		const telemetry = { emit: (e: unknown) => emitted.push(e), flush: () => Promise.resolve() };
 		const trace = createHonoTrace({
-			telemetry: telemetry as { emit: (e: unknown) => void },
+			telemetry: telemetry as { emit: (e: unknown) => void; flush: () => Promise<void> },
 			entityPatterns: [{ segment: "users", key: "userId" }],
 		});
 
@@ -126,9 +126,9 @@ describe("createHonoTrace", () => {
 
 	it("skips tracing when isEnabled returns false", async () => {
 		const emitted: unknown[] = [];
-		const telemetry = { emit: (e: unknown) => emitted.push(e) };
+		const telemetry = { emit: (e: unknown) => emitted.push(e), flush: () => Promise.resolve() };
 		const trace = createHonoTrace({
-			telemetry: telemetry as { emit: (e: unknown) => void },
+			telemetry: telemetry as { emit: (e: unknown) => void; flush: () => Promise<void> },
 			isEnabled: () => false,
 		});
 
@@ -141,11 +141,31 @@ describe("createHonoTrace", () => {
 		expect(emitted).toHaveLength(0);
 	});
 
+	it("applies sanitizePath hook to event path", async () => {
+		const emitted: unknown[] = [];
+		const telemetry = { emit: (e: unknown) => emitted.push(e), flush: () => Promise.resolve() };
+		const trace = createHonoTrace({
+			telemetry: telemetry as { emit: (e: unknown) => void; flush: () => Promise<void> },
+			sanitizePath: (p) =>
+				p.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, ":id"),
+		});
+
+		const app = new Hono();
+		app.use("*", trace);
+		app.get("/users/:id", (c) => c.text("ok"));
+
+		await app.request("/users/550e8400-e29b-41d4-a716-446655440000");
+
+		expect(emitted).toHaveLength(1);
+		const event = emitted[0] as Record<string, unknown>;
+		expect(event.path).toBe("/users/:id");
+	});
+
 	it("emits event with 500 status when handler throws", async () => {
 		const emitted: unknown[] = [];
-		const telemetry = { emit: (e: unknown) => emitted.push(e) };
+		const telemetry = { emit: (e: unknown) => emitted.push(e), flush: () => Promise.resolve() };
 		const trace = createHonoTrace({
-			telemetry: telemetry as { emit: (e: unknown) => void },
+			telemetry: telemetry as { emit: (e: unknown) => void; flush: () => Promise<void> },
 		});
 
 		const app = new Hono();
@@ -160,8 +180,8 @@ describe("createHonoTrace", () => {
 		expect(emitted).toHaveLength(1);
 		const event = emitted[0] as Record<string, unknown>;
 		expect(event.kind).toBe("http.request");
-		expect(event.status).toBe(500);
-		expect(event.error).toBe("HTTP 500");
+		expect(event.status_code).toBe(500);
+		expect(event.error_name).toBe("HTTP 500");
 		expect(event.path).toBe("/fail");
 	});
 });
@@ -183,10 +203,9 @@ describe("getTraceContext", () => {
 		await app.request("/test");
 
 		expect(ctx).toBeDefined();
-		const traceCtx = ctx as { _trace: { traceId: string; parentSpanId: string } };
+		const traceCtx = ctx as { _trace: { traceparent: string } };
 		expect(traceCtx._trace).toBeDefined();
-		expect(traceCtx._trace.traceId).toMatch(/^[\da-f]{32}$/);
-		expect(traceCtx._trace.parentSpanId).toMatch(/^[\da-f]{16}$/);
+		expect(traceCtx._trace.traceparent).toMatch(/^00-[\da-f]{32}-[\da-f]{16}-[\da-f]{2}$/);
 	});
 
 	it("returns consistent spanId across multiple calls in same request", async () => {
@@ -206,9 +225,9 @@ describe("getTraceContext", () => {
 
 		await app.request("/test");
 
-		const t1 = ctx1 as { _trace: { traceId: string; parentSpanId: string } };
-		const t2 = ctx2 as { _trace: { traceId: string; parentSpanId: string } };
-		expect(t1._trace.parentSpanId).toBe(t2._trace.parentSpanId);
+		const t1 = ctx1 as { _trace: { traceparent: string } };
+		const t2 = ctx2 as { _trace: { traceparent: string } };
+		expect(t1._trace.traceparent).toBe(t2._trace.traceparent);
 	});
 
 	it("returns empty object when no trace middleware", async () => {

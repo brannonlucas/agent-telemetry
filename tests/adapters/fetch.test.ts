@@ -15,9 +15,9 @@ function readTraceparentHeader(input: RequestInfo | URL, init?: RequestInit): st
 describe("createTracedFetch", () => {
 	it("emits external.call event for string URL", async () => {
 		const emitted: unknown[] = [];
-		const telemetry = { emit: (e: unknown) => emitted.push(e) };
+		const telemetry = { emit: (e: unknown) => emitted.push(e), flush: () => Promise.resolve() };
 		const fetch = createTracedFetch({
-			telemetry: telemetry as { emit: (e: ExternalCallEvent) => void },
+			telemetry: telemetry as { emit: (e: ExternalCallEvent) => void; flush: () => Promise<void> },
 			baseFetch: mockFetch,
 		});
 
@@ -28,17 +28,17 @@ describe("createTracedFetch", () => {
 		expect(event.kind).toBe("external.call");
 		expect(event.service).toBe("api.example.com");
 		expect(event.operation).toBe("GET /users");
-		expect(event.status).toBe("success");
+		expect(event.outcome).toBe("success");
 		expect(typeof event.duration_ms).toBe("number");
-		expect(typeof event.traceId).toBe("string");
-		expect(typeof event.spanId).toBe("string");
+		expect(typeof event.trace_id).toBe("string");
+		expect(typeof event.span_id).toBe("string");
 	});
 
 	it("emits external.call event for URL object", async () => {
 		const emitted: unknown[] = [];
-		const telemetry = { emit: (e: unknown) => emitted.push(e) };
+		const telemetry = { emit: (e: unknown) => emitted.push(e), flush: () => Promise.resolve() };
 		const fetch = createTracedFetch({
-			telemetry: telemetry as { emit: (e: ExternalCallEvent) => void },
+			telemetry: telemetry as { emit: (e: ExternalCallEvent) => void; flush: () => Promise<void> },
 			baseFetch: mockFetch,
 		});
 
@@ -49,14 +49,14 @@ describe("createTracedFetch", () => {
 		expect(event.kind).toBe("external.call");
 		expect(event.service).toBe("api.example.com");
 		expect(event.operation).toBe("GET /users");
-		expect(event.status).toBe("success");
+		expect(event.outcome).toBe("success");
 	});
 
 	it("emits external.call event for Request object", async () => {
 		const emitted: unknown[] = [];
-		const telemetry = { emit: (e: unknown) => emitted.push(e) };
+		const telemetry = { emit: (e: unknown) => emitted.push(e), flush: () => Promise.resolve() };
 		const fetch = createTracedFetch({
-			telemetry: telemetry as { emit: (e: ExternalCallEvent) => void },
+			telemetry: telemetry as { emit: (e: ExternalCallEvent) => void; flush: () => Promise<void> },
 			baseFetch: mockFetch,
 		});
 
@@ -66,14 +66,14 @@ describe("createTracedFetch", () => {
 		const event = emitted[0] as Record<string, unknown>;
 		expect(event.kind).toBe("external.call");
 		expect(event.operation).toBe("POST /users");
-		expect(event.status).toBe("success");
+		expect(event.outcome).toBe("success");
 	});
 
 	it("derives service from hostname", async () => {
 		const emitted: unknown[] = [];
-		const telemetry = { emit: (e: unknown) => emitted.push(e) };
+		const telemetry = { emit: (e: unknown) => emitted.push(e), flush: () => Promise.resolve() };
 		const fetch = createTracedFetch({
-			telemetry: telemetry as { emit: (e: ExternalCallEvent) => void },
+			telemetry: telemetry as { emit: (e: ExternalCallEvent) => void; flush: () => Promise<void> },
 			baseFetch: mockFetch,
 		});
 
@@ -85,9 +85,9 @@ describe("createTracedFetch", () => {
 
 	it("derives operation from method and pathname", async () => {
 		const emitted: unknown[] = [];
-		const telemetry = { emit: (e: unknown) => emitted.push(e) };
+		const telemetry = { emit: (e: unknown) => emitted.push(e), flush: () => Promise.resolve() };
 		const fetch = createTracedFetch({
-			telemetry: telemetry as { emit: (e: ExternalCallEvent) => void },
+			telemetry: telemetry as { emit: (e: ExternalCallEvent) => void; flush: () => Promise<void> },
 			baseFetch: mockFetch,
 		});
 
@@ -100,9 +100,9 @@ describe("createTracedFetch", () => {
 
 	it("handles relative URLs gracefully", async () => {
 		const emitted: unknown[] = [];
-		const telemetry = { emit: (e: unknown) => emitted.push(e) };
+		const telemetry = { emit: (e: unknown) => emitted.push(e), flush: () => Promise.resolve() };
 		const fetch = createTracedFetch({
-			telemetry: telemetry as { emit: (e: ExternalCallEvent) => void },
+			telemetry: telemetry as { emit: (e: ExternalCallEvent) => void; flush: () => Promise<void> },
 			baseFetch: mockFetch,
 		});
 
@@ -117,9 +117,9 @@ describe("createTracedFetch", () => {
 		const original = new Response("ok", { status: 200 });
 		const baseFetch: FetchFn = async () => original;
 		const emitted: unknown[] = [];
-		const telemetry = { emit: (e: unknown) => emitted.push(e) };
+		const telemetry = { emit: (e: unknown) => emitted.push(e), flush: () => Promise.resolve() };
 		const fetch = createTracedFetch({
-			telemetry: telemetry as { emit: (e: ExternalCallEvent) => void },
+			telemetry: telemetry as { emit: (e: ExternalCallEvent) => void; flush: () => Promise<void> },
 			baseFetch,
 		});
 
@@ -134,9 +134,9 @@ describe("createTracedFetch", () => {
 			throw networkError;
 		};
 		const emitted: unknown[] = [];
-		const telemetry = { emit: (e: unknown) => emitted.push(e) };
+		const telemetry = { emit: (e: unknown) => emitted.push(e), flush: () => Promise.resolve() };
 		const fetch = createTracedFetch({
-			telemetry: telemetry as { emit: (e: ExternalCallEvent) => void },
+			telemetry: telemetry as { emit: (e: ExternalCallEvent) => void; flush: () => Promise<void> },
 			baseFetch: failingFetch,
 		});
 
@@ -151,20 +151,20 @@ describe("createTracedFetch", () => {
 		expect(emitted).toHaveLength(1);
 		const event = emitted[0] as Record<string, unknown>;
 		expect(event.kind).toBe("external.call");
-		expect(event.status).toBe("error");
+		expect(event.outcome).toBe("error");
 		expect(typeof event.duration_ms).toBe("number");
 	});
 
 	it("skips tracing when isEnabled returns false", async () => {
 		const emitted: unknown[] = [];
-		const telemetry = { emit: (e: unknown) => emitted.push(e) };
+		const telemetry = { emit: (e: unknown) => emitted.push(e), flush: () => Promise.resolve() };
 		let fetchCalled = false;
 		const baseFetch: FetchFn = async () => {
 			fetchCalled = true;
 			return new Response("ok", { status: 200 });
 		};
 		const fetch = createTracedFetch({
-			telemetry: telemetry as { emit: (e: ExternalCallEvent) => void },
+			telemetry: telemetry as { emit: (e: ExternalCallEvent) => void; flush: () => Promise<void> },
 			baseFetch,
 			isEnabled: () => false,
 		});
@@ -183,9 +183,9 @@ describe("createTracedFetch", () => {
 			return new Response("custom", { status: 201 });
 		};
 		const emitted: unknown[] = [];
-		const telemetry = { emit: (e: unknown) => emitted.push(e) };
+		const telemetry = { emit: (e: unknown) => emitted.push(e), flush: () => Promise.resolve() };
 		const fetch = createTracedFetch({
-			telemetry: telemetry as { emit: (e: ExternalCallEvent) => void },
+			telemetry: telemetry as { emit: (e: ExternalCallEvent) => void; flush: () => Promise<void> },
 			baseFetch: customFetch,
 		});
 
@@ -198,37 +198,37 @@ describe("createTracedFetch", () => {
 
 	it("uses trace context when getTraceContext is provided", async () => {
 		const emitted: unknown[] = [];
-		const telemetry = { emit: (e: unknown) => emitted.push(e) };
+		const telemetry = { emit: (e: unknown) => emitted.push(e), flush: () => Promise.resolve() };
 		const fetch = createTracedFetch({
-			telemetry: telemetry as { emit: (e: ExternalCallEvent) => void },
+			telemetry: telemetry as { emit: (e: ExternalCallEvent) => void; flush: () => Promise<void> },
 			baseFetch: mockFetch,
 			getTraceContext: () => ({
-				traceId: "a".repeat(32),
-				parentSpanId: "b".repeat(16),
+				trace_id: "a".repeat(32),
+				parent_span_id: "b".repeat(16),
 			}),
 		});
 
 		await fetch("https://api.example.com/users");
 
 		const event = emitted[0] as Record<string, unknown>;
-		expect(event.traceId).toBe("a".repeat(32));
-		expect(event.parentSpanId).toBe("b".repeat(16));
+		expect(event.trace_id).toBe("a".repeat(32));
+		expect(event.parent_span_id).toBe("b".repeat(16));
 	});
 
 	it("injects traceparent header when propagateTo allows URL", async () => {
 		const emitted: unknown[] = [];
 		let observedTraceparent: string | null = null;
-		const telemetry = { emit: (e: unknown) => emitted.push(e) };
+		const telemetry = { emit: (e: unknown) => emitted.push(e), flush: () => Promise.resolve() };
 		const baseFetch: FetchFn = async (input, init) => {
 			observedTraceparent = readTraceparentHeader(input, init);
 			return new Response("ok", { status: 200 });
 		};
 		const fetch = createTracedFetch({
-			telemetry: telemetry as { emit: (e: ExternalCallEvent) => void },
+			telemetry: telemetry as { emit: (e: ExternalCallEvent) => void; flush: () => Promise<void> },
 			baseFetch,
 			getTraceContext: () => ({
-				traceId: "a".repeat(32),
-				parentSpanId: "b".repeat(16),
+				trace_id: "a".repeat(32),
+				parent_span_id: "b".repeat(16),
 			}),
 			propagateTo: () => true,
 		});
@@ -242,22 +242,22 @@ describe("createTracedFetch", () => {
 		if (observedTraceparent == null) {
 			throw new Error("expected traceparent header to be present");
 		}
-		expect(String(observedTraceparent)).toBe(`00-${event.traceId}-${event.spanId}-01`);
+		expect(String(observedTraceparent)).toBe(`00-${event.trace_id}-${event.span_id}-01`);
 	});
 
 	it("does not inject traceparent header by default for cross-origin requests", async () => {
 		let observedTraceparent: string | null = "preset";
-		const telemetry = { emit: () => {} };
+		const telemetry = { emit: () => {}, flush: () => Promise.resolve() };
 		const baseFetch: FetchFn = async (input, init) => {
 			observedTraceparent = readTraceparentHeader(input, init);
 			return new Response("ok", { status: 200 });
 		};
 		const fetch = createTracedFetch({
-			telemetry: telemetry as { emit: (e: ExternalCallEvent) => void },
+			telemetry: telemetry as { emit: (e: ExternalCallEvent) => void; flush: () => Promise<void> },
 			baseFetch,
 			getTraceContext: () => ({
-				traceId: "a".repeat(32),
-				parentSpanId: "b".repeat(16),
+				trace_id: "a".repeat(32),
+				parent_span_id: "b".repeat(16),
 			}),
 		});
 
@@ -267,7 +267,7 @@ describe("createTracedFetch", () => {
 	});
 
 	it("exposes response traceparent via callback", async () => {
-		const telemetry = { emit: () => {} };
+		const telemetry = { emit: () => {}, flush: () => Promise.resolve() };
 		const responseTraceparent = `00-${"c".repeat(32)}-${"d".repeat(16)}-01`;
 		let observed: string | undefined;
 		const baseFetch: FetchFn = async () =>
@@ -276,7 +276,7 @@ describe("createTracedFetch", () => {
 				headers: { traceparent: responseTraceparent },
 			});
 		const fetch = createTracedFetch({
-			telemetry: telemetry as { emit: (e: ExternalCallEvent) => void },
+			telemetry: telemetry as { emit: (e: ExternalCallEvent) => void; flush: () => Promise<void> },
 			baseFetch,
 			onResponseTraceparent: (traceparent) => {
 				observed = traceparent;
@@ -286,5 +286,41 @@ describe("createTracedFetch", () => {
 		await fetch("https://api.example.com/users");
 
 		expect(observed).toBe(responseTraceparent);
+	});
+
+	it("emits outcome error for 5xx responses", async () => {
+		const emitted: unknown[] = [];
+		const telemetry = { emit: (e: unknown) => emitted.push(e), flush: () => Promise.resolve() };
+		const serverErrorFetch: FetchFn = async () =>
+			new Response("Internal Server Error", { status: 500 });
+		const fetch = createTracedFetch({
+			telemetry: telemetry as { emit: (e: ExternalCallEvent) => void; flush: () => Promise<void> },
+			baseFetch: serverErrorFetch,
+		});
+
+		const res = await fetch("https://api.example.com/fail");
+
+		expect(res.status).toBe(500);
+		expect(emitted).toHaveLength(1);
+		const event = emitted[0] as Record<string, unknown>;
+		expect(event.outcome).toBe("error");
+		expect(event.status_code).toBe(500);
+	});
+
+	it("emits outcome success for 4xx responses", async () => {
+		const emitted: unknown[] = [];
+		const telemetry = { emit: (e: unknown) => emitted.push(e), flush: () => Promise.resolve() };
+		const notFoundFetch: FetchFn = async () => new Response("Not Found", { status: 404 });
+		const fetch = createTracedFetch({
+			telemetry: telemetry as { emit: (e: ExternalCallEvent) => void; flush: () => Promise<void> },
+			baseFetch: notFoundFetch,
+		});
+
+		const res = await fetch("https://api.example.com/missing");
+
+		expect(res.status).toBe(404);
+		expect(emitted).toHaveLength(1);
+		const event = emitted[0] as Record<string, unknown>;
+		expect(event.outcome).toBe("success");
 	});
 });
