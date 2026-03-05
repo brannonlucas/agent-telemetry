@@ -87,7 +87,7 @@ One `trace_id` follows a request from the HTTP boundary through database queries
 
 ## Full-Stack Example
 
-Create **one** telemetry instance and share it across both adapters:
+Create **one** telemetry instance and share it across adapters:
 
 ```typescript
 // lib/telemetry.ts
@@ -104,12 +104,19 @@ import { createHonoTrace, getTraceContext } from 'agent-telemetry/hono'
 import { createInngestTrace } from 'agent-telemetry/inngest'
 import { telemetry } from './lib/telemetry'
 
+// --- Background job tracing (define client before use) ---
+const inngestTrace = createInngestTrace({
+  telemetry,
+  entityKeys: ['userId'],
+})
+
+const inngest = new Inngest({ id: 'my-app', middleware: [inngestTrace] })
+
 // --- HTTP tracing ---
 const trace = createHonoTrace({
   telemetry,
   entityPatterns: [
     { segment: 'users', key: 'userId' },
-    { segment: 'posts', key: 'postId' },
   ],
 })
 
@@ -124,19 +131,13 @@ app.post('/api/users/:id/process', async (c) => {
   })
   return c.json({ ok: true })
 })
-
-// --- Background job tracing ---
-const inngestTrace = createInngestTrace({
-  telemetry,
-  entityKeys: ['userId', 'postId'],
-})
-
-const inngest = new Inngest({ id: 'my-app', middleware: [inngestTrace] })
 ```
+
+The `getTraceContext(c)` call spreads `{ _trace: { traceparent: "00-..." } }` into the dispatch payload. The Inngest middleware reads `_trace.traceparent` on the receiving end to continue the trace.
 
 This produces a correlated trace:
 ```jsonl
-{"kind":"http.request","trace_id":"aabb...","span_id":"cc11...","method":"POST","path":"/api/users/550e8400-e29b-41d4-a716-446655440000/process","status_code":200,"outcome":"success","duration_ms":45,"entities":{"userId":"550e8400-e29b-41d4-a716-446655440000"},"record_type":"event","spec_version":1,"timestamp":"..."}
+{"kind":"http.request","trace_id":"aabb...","span_id":"cc11...","method":"POST","path":"/api/users/550e8400-e29b-41d4-a716-446655440000/process","status_code":200,"outcome":"success","duration_ms":45,"entities":{"userId":"550e8400-..."},"record_type":"event","spec_version":1,"timestamp":"..."}
 {"kind":"job.dispatch","trace_id":"aabb...","span_id":"dd11...","parent_span_id":"cc11...","task_name":"app/user.process","outcome":"success","record_type":"event","spec_version":1,"timestamp":"..."}
 {"kind":"job.start","trace_id":"aabb...","span_id":"ee22...","parent_span_id":"dd11...","task_name":"my-app/process-user","task_id":"run-abc","record_type":"event","spec_version":1,"timestamp":"..."}
 {"kind":"job.end","trace_id":"aabb...","span_id":"ee22...","task_name":"my-app/process-user","task_id":"run-abc","duration_ms":230,"outcome":"success","record_type":"event","spec_version":1,"timestamp":"..."}
