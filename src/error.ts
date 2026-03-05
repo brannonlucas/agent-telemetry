@@ -14,3 +14,8 @@ export function toSafeErrorLabel(err: unknown): string {
 	if (!name) return DEFAULT_ERROR_LABEL;
 	return name.slice(0, MAX_ERROR_LABEL_LENGTH);
 }
+
+/** Derive outcome from HTTP status code. 500+ is "error", everything else "success". */
+export function httpOutcome(statusCode: number): "success" | "error" {
+	return statusCode >= 500 ? "error" : "success";
+}

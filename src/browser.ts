@@ -8,47 +8,36 @@ import {
 import { generateSpanId, generateTraceId } from "./ids.ts";
 import { normalizeTraceFlags, startSpan } from "./trace-context.ts";
 import { formatTraceparent, parseTraceparent } from "./traceparent.ts";
-import type { TraceContext } from "./types.ts";
+import type { LegacyTraceContext } from "./types.ts";
 
 export type { FetchFn } from "./fetch-utils.ts";
 
-interface BrowserTraceState {
-	traceId: string;
-	parentSpanId: string;
-	traceFlags: string;
-}
+/** Browser trace state — decomposed for internal manipulation. */
+type BrowserTraceState = Required<LegacyTraceContext>;
 
-function readMetaTraceparent(metaName: string): string | undefined {
+function readMetaContent(metaName: string): string | undefined {
 	if (typeof document === "undefined") return undefined;
 	const value = document.querySelector(`meta[name="${metaName}"]`)?.getAttribute("content");
 	return value ?? undefined;
 }
 
-function toTraceContext(state: BrowserTraceState): TraceContext {
-	return {
-		traceId: state.traceId,
-		parentSpanId: state.parentSpanId,
-		traceFlags: state.traceFlags,
-	};
-}
-
 /** Browser trace context manager for request propagation. */
 export interface BrowserTraceContext {
 	/** Get the current trace context for child operations. */
-	getTraceContext(): TraceContext;
+	getTraceContext(): LegacyTraceContext;
 	/** Get a serialized `traceparent` for the current context. */
 	getTraceparent(): string;
 	/** Replace the current trace context. */
-	setTraceContext(context: TraceContext): void;
+	setTraceContext(context: LegacyTraceContext): void;
 	/** Parse and adopt an incoming `traceparent` header value. */
 	updateFromTraceparent(traceparent: string | null | undefined): boolean;
 	/**
 	 * Run work under a child span.
-	 * The callback receives a context whose `parentSpanId` is the created span ID.
+	 * The callback receives a context whose `parent_span_id` is the created span ID.
 	 */
 	withSpan<T>(
 		name: string,
-		run: (context: TraceContext & { spanId: string; name: string }) => Promise<T> | T,
+		run: (context: LegacyTraceContext & { span_id: string; name: string }) => Promise<T> | T,
 	): Promise<T>;
 }
 
@@ -70,55 +59,55 @@ export interface BrowserTraceContextOptions {
 export function createBrowserTraceContext(
 	options: BrowserTraceContextOptions = {},
 ): BrowserTraceContext {
-	const metaName = options.metaName ?? "traceparent";
-	const bootstrap = options.initialTraceparent ?? readMetaTraceparent(metaName);
+	const metaName = options.metaName ?? "agent-telemetry-traceparent";
+	const bootstrap = options.initialTraceparent ?? readMetaContent(metaName);
 	const parsed = parseTraceparent(bootstrap);
 
 	const state: BrowserTraceState = {
-		traceId: parsed?.traceId ?? generateTraceId(),
-		parentSpanId: parsed?.parentId ?? generateSpanId(),
-		traceFlags: normalizeTraceFlags(parsed?.traceFlags),
+		trace_id: parsed?.traceId ?? generateTraceId(),
+		parent_span_id: parsed?.parentId ?? generateSpanId(),
+		trace_flags: normalizeTraceFlags(parsed?.traceFlags),
 	};
 
 	const api: BrowserTraceContext = {
 		getTraceContext() {
-			return toTraceContext(state);
+			return { ...state };
 		},
 		getTraceparent() {
-			return formatTraceparent(state.traceId, state.parentSpanId, state.traceFlags);
+			return formatTraceparent(state.trace_id, state.parent_span_id, state.trace_flags);
 		},
 		setTraceContext(context) {
-			state.traceId = context.traceId;
-			state.parentSpanId = context.parentSpanId;
-			state.traceFlags = normalizeTraceFlags(context.traceFlags);
+			state.trace_id = context.trace_id;
+			state.parent_span_id = context.parent_span_id;
+			state.trace_flags = normalizeTraceFlags(context.trace_flags);
 		},
 		updateFromTraceparent(traceparent) {
 			const incoming = parseTraceparent(traceparent);
 			if (!incoming) return false;
-			state.traceId = incoming.traceId;
-			state.parentSpanId = incoming.parentId;
-			state.traceFlags = normalizeTraceFlags(incoming.traceFlags);
+			state.trace_id = incoming.traceId;
+			state.parent_span_id = incoming.parentId;
+			state.trace_flags = normalizeTraceFlags(incoming.traceFlags);
 			return true;
 		},
 		async withSpan(name, run) {
-			const currentParent = state.parentSpanId;
+			const currentParent = state.parent_span_id;
 			const span = startSpan({
-				traceId: state.traceId,
-				parentSpanId: currentParent,
-				traceFlags: state.traceFlags,
+				trace_id: state.trace_id,
+				parent_span_id: currentParent,
+				trace_flags: state.trace_flags,
 			});
 
-			state.parentSpanId = span.spanId;
+			state.parent_span_id = span.span_id;
 			try {
 				return await run({
-					traceId: span.traceId,
-					parentSpanId: span.spanId,
-					traceFlags: span.traceFlags,
-					spanId: span.spanId,
+					trace_id: span.trace_id,
+					parent_span_id: span.span_id,
+					trace_flags: span.trace_flags,
+					span_id: span.span_id,
 					name,
 				});
 			} finally {
-				state.parentSpanId = currentParent;
+				state.parent_span_id = currentParent;
 			}
 		},
 	};
@@ -147,7 +136,7 @@ export function createBrowserTracedFetch(options: BrowserTracedFetchOptions = {}
 		baseFetch = globalThis.fetch,
 		trace = createBrowserTraceContext(),
 		propagateTo = defaultPropagateTo,
-		updateContextFromResponse = true,
+		updateContextFromResponse = false,
 	} = options;
 
 	return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
@@ -156,11 +145,11 @@ export function createBrowserTracedFetch(options: BrowserTracedFetchOptions = {}
 
 		const ctx = trace.getTraceContext();
 		const span = startSpan({
-			traceId: ctx.traceId,
-			parentSpanId: ctx.parentSpanId,
-			traceFlags: ctx.traceFlags,
+			trace_id: ctx.trace_id,
+			parent_span_id: ctx.parent_span_id,
+			trace_flags: ctx.trace_flags,
 		});
-		const traceparent = formatTraceparent(span.traceId, span.spanId, span.traceFlags);
+		const traceparent = formatTraceparent(span.trace_id, span.span_id, span.trace_flags);
 
 		const outbound = propagateTo(parsedUrl)
 			? injectTraceparent(input, init, traceparent)
@@ -172,9 +161,9 @@ export function createBrowserTracedFetch(options: BrowserTracedFetchOptions = {}
 			const responseTraceparent = response.headers.get("traceparent");
 			if (!responseTraceparent || !trace.updateFromTraceparent(responseTraceparent)) {
 				trace.setTraceContext({
-					traceId: span.traceId,
-					parentSpanId: span.spanId,
-					traceFlags: span.traceFlags,
+					trace_id: span.trace_id,
+					parent_span_id: span.span_id,
+					trace_flags: span.trace_flags,
 				});
 			}
 		}

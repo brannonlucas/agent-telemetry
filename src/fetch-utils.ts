@@ -17,6 +17,15 @@ export function getLocationOrigin(): string | undefined {
 	return origin;
 }
 
+export function stripQueryAndFragment(url: string): string {
+	const queryIdx = url.indexOf("?");
+	const hashIdx = url.indexOf("#");
+	const cutIdx =
+		queryIdx === -1 ? hashIdx : hashIdx === -1 ? queryIdx : Math.min(queryIdx, hashIdx);
+	const clean = cutIdx === -1 ? url : url.slice(0, cutIdx);
+	return clean || "/";
+}
+
 export function resolveUrl(url: string): URL {
 	const base = getLocationOrigin() ?? "http://localhost";
 	return new URL(url, base);

@@ -50,7 +50,11 @@ export function parseTraceparent(header: string | undefined | null): Traceparent
  *
  * @param traceId  32-char lowercase hex trace ID
  * @param parentId 16-char lowercase hex parent/span ID
- * @param flags    2-char hex trace flags (default: "01" = sampled)
+ * @param flags    2-char hex trace flags (default: "01" = sampled).
+ *   Use "01" when the caller is actively recording telemetry (the common case
+ *   for adapter-generated traceparents). Use "00" for contexts that are not
+ *   recording — e.g. passthrough proxies or external callers that only
+ *   propagate context without emitting events.
  */
 export function formatTraceparent(traceId: string, parentId: string, flags = "01"): string {
 	return `00-${traceId}-${parentId}-${flags}`;

@@ -10,32 +10,40 @@ export function normalizeTraceFlags(traceFlags: string | undefined): string {
 }
 
 export interface SpanStartOptions {
-	traceId?: string;
-	parentSpanId?: string;
-	traceFlags?: string;
+	trace_id?: string;
+	parent_span_id?: string;
+	trace_flags?: string;
+	tracestate?: string;
 }
 
 export interface SpanContext {
-	traceId: string;
-	spanId: string;
-	parentSpanId?: string;
-	traceFlags: string;
+	trace_id: string;
+	span_id: string;
+	parent_span_id?: string;
+	trace_flags: string;
+	tracestate?: string;
 }
 
 export function startSpan(options: SpanStartOptions = {}): SpanContext {
 	return {
-		traceId: options.traceId ?? generateTraceId(),
-		spanId: generateSpanId(),
-		parentSpanId: options.parentSpanId,
-		traceFlags: normalizeTraceFlags(options.traceFlags),
+		trace_id: options.trace_id ?? generateTraceId(),
+		span_id: generateSpanId(),
+		parent_span_id: options.parent_span_id,
+		trace_flags: normalizeTraceFlags(options.trace_flags),
+		tracestate: options.tracestate,
 	};
 }
 
-export function startSpanFromTraceparent(header: string | null | undefined): SpanContext {
+export function startSpanFromTraceparent(
+	header: string | null | undefined,
+	tracestate?: string | null,
+): SpanContext {
 	const parsed = parseTraceparent(header);
 	return startSpan({
-		traceId: parsed?.traceId,
-		parentSpanId: parsed?.parentId,
-		traceFlags: parsed?.traceFlags,
+		trace_id: parsed?.traceId,
+		parent_span_id: parsed?.parentId,
+		trace_flags: parsed?.traceFlags,
+		// tracestate MUST be discarded when no valid traceparent exists (spec §7.4)
+		tracestate: parsed ? (tracestate ?? undefined) : undefined,
 	});
 }
