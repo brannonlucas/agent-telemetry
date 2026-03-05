@@ -7,11 +7,12 @@ import { createHonoTrace, getTraceContext } from "../src/adapters/hono.ts";
 import { toSafeErrorLabel } from "../src/error.ts";
 import { createTelemetry } from "../src/index.ts";
 import { startSpan } from "../src/trace-context.ts";
-import { formatTraceparent } from "../src/traceparent.ts";
+import { formatTraceparent, parseTraceparent } from "../src/traceparent.ts";
 import type {
 	DbQueryEvent,
 	ExternalCallEvent,
 	HttpRequestEvent,
+	LegacyTraceContext,
 	PresetEvents,
 	Telemetry,
 	TraceContext,
@@ -189,9 +190,17 @@ app.use(
 	}),
 );
 
-function resolveTraceContext(ctx: ReturnType<typeof getTraceContext>): TraceContext | undefined {
-	if ("_trace" in ctx) return ctx._trace;
-	return undefined;
+function resolveTraceContext(
+	ctx: ReturnType<typeof getTraceContext>,
+): LegacyTraceContext | undefined {
+	if (!("_trace" in ctx)) return undefined;
+	const parsed = parseTraceparent(ctx._trace.traceparent);
+	if (!parsed) return undefined;
+	return {
+		trace_id: parsed.traceId,
+		parent_span_id: parsed.parentId,
+		trace_flags: parsed.traceFlags,
+	};
 }
 
 async function readLastTelemetryLines(maxLines: number): Promise<string[]> {
@@ -248,16 +257,16 @@ interface TimelineEvent {
 	label: string;
 	detail: string;
 	status?: string;
-	spanId?: string;
-	parentSpanId?: string;
+	span_id?: string;
+	parent_span_id?: string;
 	startMs: number;
 	endMs: number;
 	durationMs: number;
 }
 
 interface TimelineResponse {
-	traceId: string;
-	rootSpanId?: string;
+	trace_id: string;
+	root_span_id?: string;
 	startTimestamp: string;
 	endTimestamp: string;
 	totalDurationMs: number;
@@ -270,8 +279,8 @@ interface ParsedTimelineEvent {
 	label: string;
 	detail: string;
 	status?: string;
-	spanId?: string;
-	parentSpanId?: string;
+	span_id?: string;
+	parent_span_id?: string;
 	startEpochMs: number;
 	endEpochMs: number;
 	durationMs: number;
@@ -291,17 +300,20 @@ function toTimelinePresentation(line: Record<string, unknown>): {
 	label: string;
 	detail: string;
 	status?: string;
-	spanId?: string;
-	parentSpanId?: string;
+	span_id?: string;
+	parent_span_id?: string;
 } {
 	const kind = asString(line.kind) ?? "unknown";
-	const spanId = asString(line.spanId);
-	const parentSpanId = asString(line.parentSpanId);
-	const statusValue = line.status;
+	const span_id = asString(line.span_id);
+	const parent_span_id = asString(line.parent_span_id);
+	const statusCodeValue = line.status_code;
+	const outcomeValue = line.outcome;
 	const status =
-		typeof statusValue === "number" || typeof statusValue === "string"
-			? String(statusValue)
-			: undefined;
+		typeof statusCodeValue === "number"
+			? String(statusCodeValue)
+			: typeof outcomeValue === "string"
+				? outcomeValue
+				: undefined;
 
 	if (kind === "http.request") {
 		const method = asString(line.method) ?? "HTTP";
@@ -312,8 +324,8 @@ function toTimelinePresentation(line: Record<string, unknown>): {
 			label,
 			detail: status ? `http status ${status}` : "http request",
 			status,
-			spanId,
-			parentSpanId,
+			span_id,
+			parent_span_id,
 		};
 	}
 
@@ -327,8 +339,8 @@ function toTimelinePresentation(line: Record<string, unknown>): {
 			label,
 			detail: status ? `db status ${status}` : "db query",
 			status,
-			spanId,
-			parentSpanId,
+			span_id,
+			parent_span_id,
 		};
 	}
 
@@ -340,8 +352,8 @@ function toTimelinePresentation(line: Record<string, unknown>): {
 			label: `${service} ${operation}`,
 			detail: status ? `external status ${status}` : "external call",
 			status,
-			spanId,
-			parentSpanId,
+			span_id,
+			parent_span_id,
 		};
 	}
 
@@ -350,8 +362,8 @@ function toTimelinePresentation(line: Record<string, unknown>): {
 		label: kind,
 		detail: "event",
 		status,
-		spanId,
-		parentSpanId,
+		span_id,
+		parent_span_id,
 	};
 }
 
@@ -366,10 +378,10 @@ function filterBySpanSubtree(
 	const childrenByParent = new Map<string, Set<string>>();
 
 	for (const event of events) {
-		if (!event.spanId || !event.parentSpanId) continue;
-		const set = childrenByParent.get(event.parentSpanId) ?? new Set<string>();
-		set.add(event.spanId);
-		childrenByParent.set(event.parentSpanId, set);
+		if (!event.span_id || !event.parent_span_id) continue;
+		const set = childrenByParent.get(event.parent_span_id) ?? new Set<string>();
+		set.add(event.span_id);
+		childrenByParent.set(event.parent_span_id, set);
 	}
 
 	const allowedSpanIds = new Set<string>();
@@ -386,8 +398,8 @@ function filterBySpanSubtree(
 	}
 
 	return events.filter((event) => {
-		if (!event.spanId) return false;
-		return allowedSpanIds.has(event.spanId);
+		if (!event.span_id) return false;
+		return allowedSpanIds.has(event.span_id);
 	});
 }
 
@@ -404,7 +416,7 @@ async function buildTraceTimelineForSpan(
 			const decoded = JSON.parse(line) as unknown;
 			if (typeof decoded !== "object" || decoded === null) continue;
 			const event = decoded as Record<string, unknown>;
-			if (asString(event.traceId) !== traceId) continue;
+			if (asString(event.trace_id) !== traceId) continue;
 
 			const timestampRaw = asString(event.timestamp);
 			if (!timestampRaw) continue;
@@ -429,8 +441,8 @@ async function buildTraceTimelineForSpan(
 	if (parsed.length === 0) {
 		const nowIso = new Date().toISOString();
 		return {
-			traceId,
-			rootSpanId,
+			trace_id: traceId,
+			root_span_id: rootSpanId,
 			startTimestamp: nowIso,
 			endTimestamp: nowIso,
 			totalDurationMs: 0,
@@ -445,8 +457,8 @@ async function buildTraceTimelineForSpan(
 	if (scoped.length === 0) {
 		const nowIso = new Date().toISOString();
 		return {
-			traceId,
-			rootSpanId,
+			trace_id: traceId,
+			root_span_id: rootSpanId,
 			startTimestamp: nowIso,
 			endTimestamp: nowIso,
 			totalDurationMs: 0,
@@ -455,7 +467,7 @@ async function buildTraceTimelineForSpan(
 		};
 	}
 
-	const rootEvent = rootSpanId ? scoped.find((event) => event.spanId === rootSpanId) : undefined;
+	const rootEvent = rootSpanId ? scoped.find((event) => event.span_id === rootSpanId) : undefined;
 
 	const traceStartMs =
 		rootEvent?.startEpochMs ??
@@ -471,8 +483,8 @@ async function buildTraceTimelineForSpan(
 	const totalDurationMs = Math.max(1, traceEndMs - traceStartMs);
 
 	return {
-		traceId,
-		rootSpanId,
+		trace_id: traceId,
+		root_span_id: rootSpanId,
 		startTimestamp: new Date(traceStartMs).toISOString(),
 		endTimestamp: new Date(traceEndMs).toISOString(),
 		totalDurationMs,
@@ -482,8 +494,8 @@ async function buildTraceTimelineForSpan(
 			label: event.label,
 			detail: event.detail,
 			status: event.status,
-			spanId: event.spanId,
-			parentSpanId: event.parentSpanId,
+			span_id: event.span_id,
+			parent_span_id: event.parent_span_id,
 			startMs: event.startEpochMs - traceStartMs,
 			endMs: event.endEpochMs - traceStartMs,
 			durationMs: event.durationMs,
@@ -493,20 +505,20 @@ async function buildTraceTimelineForSpan(
 
 function selectUserById(
 	id: string,
-	parentTrace: TraceContext | undefined,
+	parentTrace: LegacyTraceContext | undefined,
 ): Promise<{ row: { id: string; email: string; plan: string } | null; simulatedDelayMs: number }> {
 	return selectUserByIdWithDelay(id, parentTrace);
 }
 
 async function selectUserByIdWithDelay(
 	id: string,
-	parentTrace: TraceContext | undefined,
+	parentTrace: LegacyTraceContext | undefined,
 ): Promise<{ row: { id: string; email: string; plan: string } | null; simulatedDelayMs: number }> {
 	const start = performance.now();
 	const span = startSpan({
-		traceId: parentTrace?.traceId,
-		parentSpanId: parentTrace?.parentSpanId,
-		traceFlags: parentTrace?.traceFlags,
+		trace_id: parentTrace?.trace_id,
+		parent_span_id: parentTrace?.parent_span_id,
+		trace_flags: parentTrace?.trace_flags,
 	});
 
 	try {
@@ -518,30 +530,34 @@ async function selectUserByIdWithDelay(
 		} | null;
 
 		const event: DbQueryEvent = {
+			record_type: "event",
+			spec_version: 1,
 			kind: "db.query",
-			traceId: span.traceId,
-			spanId: span.spanId,
-			parentSpanId: span.parentSpanId,
+			trace_id: span.trace_id,
+			span_id: span.span_id,
+			parent_span_id: span.parent_span_id,
 			provider: "sqlite",
 			model: "users",
 			operation: "select",
 			duration_ms: Math.round(performance.now() - start),
-			status: "success",
+			outcome: "success",
 		};
 		(telemetry as Telemetry<DbQueryEvent>).emit(event);
 		return { row, simulatedDelayMs };
 	} catch (err) {
 		const event: DbQueryEvent = {
+			record_type: "event",
+			spec_version: 1,
 			kind: "db.query",
-			traceId: span.traceId,
-			spanId: span.spanId,
-			parentSpanId: span.parentSpanId,
+			trace_id: span.trace_id,
+			span_id: span.span_id,
+			parent_span_id: span.parent_span_id,
 			provider: "sqlite",
 			model: "users",
 			operation: "select",
 			duration_ms: Math.round(performance.now() - start),
-			status: "error",
-			error: toSafeErrorLabel(err),
+			outcome: "error",
+			error_name: toSafeErrorLabel(err),
 		};
 		(telemetry as Telemetry<DbQueryEvent>).emit(event);
 		throw err;
@@ -551,7 +567,7 @@ async function selectUserByIdWithDelay(
 app.get("/", (c) => {
 	const trace = resolveTraceContext(getTraceContext(c));
 	const bootstrapTraceparent = trace
-		? formatTraceparent(trace.traceId, trace.parentSpanId, trace.traceFlags ?? "01")
+		? formatTraceparent(trace.trace_id, trace.parent_span_id, trace.trace_flags ?? "01")
 		: "";
 
 	return c.html(`<!doctype html>
@@ -813,7 +829,7 @@ app.get("/api/users/:id/report", async (c) => {
 
 	const tracedFetch = createTracedFetch({
 		telemetry: telemetry as Telemetry<ExternalCallEvent>,
-		getTraceContext: () => requestTrace,
+		getTraceContext: () => requestTrace ?? undefined,
 		propagateTo: (url) => url.origin === upstreamOrigin,
 	});
 
@@ -833,8 +849,8 @@ app.get("/api/users/:id/report", async (c) => {
 			betweenStepsDelayMs,
 			upstreamDelayMs,
 		},
-		traceId: requestTrace?.traceId ?? null,
-		requestSpanId: requestTrace?.parentSpanId ?? null,
+		trace_id: requestTrace?.trace_id ?? null,
+		request_span_id: requestTrace?.parent_span_id ?? null,
 		trace: requestTrace ?? null,
 		logFile: LOG_FILE,
 	});

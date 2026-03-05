@@ -43,9 +43,13 @@
 		"./browser": {
 			"import": "./src/browser.ts",
 			"types": "./src/browser.ts"
+		},
+		"./consumer": {
+			"import": "./src/consumer/index.ts",
+			"types": "./src/consumer/index.ts"
 		}
 	},
-	"files": ["src"],
+	"files": ["src", "contracts"],
 	"scripts": {
 		"test": "bun test",
 		"typecheck": "tsc --noEmit",
@@ -95,6 +99,8 @@
 		"agent",
 		"ai",
 		"tracing",
+		"w3c-trace-context",
+		"traceparent",
 		"express",
 		"fastify",
 		"fetch",
@@ -102,6 +108,14 @@
 		"inngest",
 		"nextjs",
 		"prisma",
-		"supabase"
-	]
+		"supabase",
+		"consumer",
+		"truncation"
+	],
+	"agentTelemetry": {
+		"specVersion": 1,
+		"profiles": ["Core", "File", "Browser", "Async", "Rotation", "Agent Consumption"],
+		"roles": ["producer", "writer", "consumer"],
+		"note": "OTel Projection profile is NOT claimed. Ships post-1.0."
+	}
 }

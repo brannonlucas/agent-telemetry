@@ -8,6 +8,8 @@ paths = [
   '''demo/.*\.ts''',
   '''contracts/.*/manifest\.json''',
   '''src/consumer/pipeline\.ts''',
+  '''agent-telemetry-spec\.md''',
+  '''agent-telemetry-v1-outline\.md''',
 ]
 
 [[rules]]
