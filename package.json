@@ -1,6 +1,6 @@
 {
 	"name": "agent-telemetry",
-	"version": "0.9.0",
+	"version": "0.10.0",
 	"description": "Lightweight JSONL telemetry for AI agent backends. Zero deps, framework adapters included.",
 	"type": "module",
 	"exports": {
@@ -47,9 +47,13 @@
 		"./consumer": {
 			"import": "./src/consumer/index.ts",
 			"types": "./src/consumer/index.ts"
+		},
+		"./schema": {
+			"import": "./src/schema.ts",
+			"types": "./src/schema.ts"
 		}
 	},
-	"files": ["src", "contracts"],
+	"files": ["src", "contracts", "AGENT.md"],
 	"scripts": {
 		"test": "bun test",
 		"typecheck": "tsc --noEmit",
