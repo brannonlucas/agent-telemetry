@@ -87,7 +87,7 @@
 		"@types/bun": "latest",
 		"fastify": "^5.7.4",
 		"hono": "^4.7.0",
-		"inngest": "^3.0.0",
+		"inngest": "^4.0.0",
 		"typescript": "^5.7.0"
 	},
 	"license": "MIT",
